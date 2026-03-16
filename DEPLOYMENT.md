@@ -135,6 +135,18 @@ railway variables:set OPENAI_API_KEY=...
 railway run npx prisma migrate deploy
 ```
 
+
+### Option 4: Netlify (Static Landing Page)
+
+This repository currently deploys the landing page as a **static site** from `public/`.
+
+1. Connect repo to Netlify.
+2. Build command: `npm run build:static`
+3. Publish directory: `public`
+4. Node version: `20`
+
+`netlify.toml` already includes these defaults, so most projects can deploy without dashboard overrides.
+
 ### Option 3: AWS/GCP (Enterprise Scale)
 
 #### Architecture:
