@@ -70,6 +70,24 @@ Open http://localhost:3000
 
 ## 🌐 Production Deployment
 
+### Option 0: Netlify (Static Homepage)
+
+Use this when you only want to host the landing page (`public/index.html`) quickly.
+
+```bash
+# Build static homepage bundle
+npm run build:homepage
+
+# Optional: preview locally
+npm run serve:homepage
+```
+
+Netlify settings:
+- **Build command:** `npm run build:homepage`
+- **Publish directory:** `dist`
+
+This repository also includes `netlify.toml` configured for static publishing and SPA-style redirects.
+
 ### Option 1: Vercel + Supabase (Recommended)
 
 #### 1. Database (Supabase)
