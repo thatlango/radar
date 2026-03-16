@@ -1,1224 +1,387 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Radar - Find Your Next Opportunity</title>
-    <meta name="description" content="AI-powered opportunities matched to you. Africa's most intelligent job and fellowship platform.">
-    <meta name="theme-color" content="#FF6B35">
-    
-    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlJhZGFyIiwKICAic2hvcnRfbmFtZSI6ICJSYWRhciIsCiAgImRlc2NyaXB0aW9uIjogIkRpc2NvdmVyIE9wcG9ydHVuaXRpZXMgQmVmb3JlIEV2ZXJ5b25lIEVsc2UiLAogICJzdGFydF91cmwiOiAiLyIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiIzBBMEEwQSIsCiAgInRoZW1lX2NvbG9yIjogIiNGRjZCMzUiCn0=">
-    
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-    
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        :root {
-            --primary: #FF6B35;
-            --primary-dark: #E85A28;
-            --secondary: #00D9FF;
-            --bg-dark: #0A0A0A;
-            --bg-card: #141414;
-            --text-primary: #FFFFFF;
-            --text-muted: #A0A0A0;
-            --border: #2A2A2A;
-            --success: #00FF88;
-            --warning: #FFD600;
-        }
-        
-        html {
-            font-size: 16px;
-            scroll-behavior: smooth;
-        }
-        
-        body {
-            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            color: var(--text-primary);
-            background: var(--bg-dark);
-            line-height: 1.6;
-            overflow-x: hidden;
-        }
-        
-        #root {
-            min-height: 100vh;
-        }
-        
-        /* Animated Background */
-        .animated-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            overflow: hidden;
-            pointer-events: none;
-        }
-        
-        .animated-bg::before {
-            content: '';
-            position: absolute;
-            width: 150%;
-            height: 150%;
-            background: 
-                radial-gradient(circle at 20% 30%, rgba(255, 107, 53, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 80% 70%, rgba(0, 217, 255, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(0, 255, 136, 0.08) 0%, transparent 70%);
-            animation: bgShift 20s ease-in-out infinite;
-        }
-        
-        @keyframes bgShift {
-            0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            33% { transform: translate(-5%, 5%) rotate(3deg); }
-            66% { transform: translate(5%, -5%) rotate(-3deg); }
-        }
-        
-        /* Typography */
-        .heading-hero {
-            font-family: 'Syne', sans-serif;
-            font-size: clamp(2.5rem, 8vw, 5rem);
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            line-height: 1;
-            background: linear-gradient(135deg, #FFFFFF 0%, #A0A0A0 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .heading-xl {
-            font-family: 'Syne', sans-serif;
-            font-size: clamp(2rem, 5vw, 3.5rem);
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            line-height: 1.1;
-        }
-        
-        .heading-lg {
-            font-family: 'Syne', sans-serif;
-            font-size: clamp(1.5rem, 3vw, 2rem);
-            font-weight: 600;
-            letter-spacing: -0.01em;
-            line-height: 1.2;
-        }
-        
-        .gradient-text {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        /* Navigation */
-        .nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 1000;
-            background: rgba(10, 10, 10, 0.8);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border);
-        }
-        
-        .nav-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 1rem 2rem;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        
-        .logo {
-            font-family: 'Syne', sans-serif;
-            font-size: 1.5rem;
-            font-weight: 800;
-            color: var(--text-primary);
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            font-size: 1.2rem;
-        }
-        
-        .nav-links {
-            display: flex;
-            gap: 2rem;
-            align-items: center;
-        }
-        
-        .nav-link {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.95rem;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-        }
-        
-        .nav-link:hover {
-            color: var(--text-primary);
-        }
-        
-        .nav-link::after {
-            content: '';
-            position: absolute;
-            bottom: -4px;
-            left: 0;
-            width: 0;
-            height: 2px;
-            background: var(--primary);
-            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .nav-link:hover::after,
-        .nav-link.active::after {
-            width: 100%;
-        }
-        
-        /* Buttons */
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            padding: 1rem 2rem;
-            border: none;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            text-decoration: none;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s;
-        }
-        
-        .btn:hover::before {
-            left: 100%;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-            box-shadow: 0 8px 24px rgba(255, 107, 53, 0.4);
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 32px rgba(255, 107, 53, 0.5);
-        }
-        
-        .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-        
-        .btn-secondary:hover {
-            border-color: var(--primary);
-            transform: translateY(-2px);
-        }
-        
-        .btn-ghost {
-            background: transparent;
-            color: var(--text-primary);
-            border: 1px solid var(--border);
-        }
-        
-        .btn-ghost:hover {
-            background: var(--bg-card);
-            border-color: var(--primary);
-        }
-        
-        .btn-sm {
-            padding: 0.5rem 1rem;
-            font-size: 0.875rem;
-        }
-        
-        /* Cards */
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 1.5rem;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, var(--primary), var(--secondary));
-            transform: scaleX(0);
-            transform-origin: left;
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .card-hover:hover {
-            border-color: var(--primary);
-            transform: translateY(-4px);
-            box-shadow: 0 20px 40px rgba(255, 107, 53, 0.2);
-        }
-        
-        .card-hover:hover::before {
-            transform: scaleX(1);
-        }
-        
-        /* Opportunity Card - Dramatically Improved */
-        .opportunity-card {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            position: relative;
-        }
-        
-        .opportunity-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 1rem;
-        }
-        
-        .opportunity-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text-primary);
-            line-height: 1.3;
-            flex: 1;
-        }
-        
-        .match-badge {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: linear-gradient(135deg, rgba(0, 255, 136, 0.2) 0%, rgba(0, 217, 255, 0.2) 100%);
-            border: 1px solid var(--success);
-            border-radius: 24px;
-            font-weight: 700;
-            font-size: 0.875rem;
-            color: var(--success);
-            white-space: nowrap;
-            animation: pulse 2s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-        
-        .opportunity-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            align-items: center;
-        }
-        
-        .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            color: var(--text-muted);
-            font-size: 0.875rem;
-        }
-        
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.375rem 0.875rem;
-            border-radius: 8px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        
-        .badge-remote {
-            background: linear-gradient(135deg, var(--secondary) 0%, #00A8CC 100%);
-            color: white;
-        }
-        
-        .badge-type {
-            background: rgba(160, 160, 160, 0.1);
-            color: var(--text-muted);
-            border: 1px solid var(--border);
-        }
-        
-        .badge-pro {
-            background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-            color: var(--bg-dark);
-            animation: shimmer 2s ease-in-out infinite;
-        }
-        
-        @keyframes shimmer {
-            0%, 100% { filter: brightness(1); }
-            50% { filter: brightness(1.2); }
-        }
-        
-        .opportunity-actions {
-            display: flex;
-            gap: 0.75rem;
-            margin-top: 0.5rem;
-        }
-        
-        .btn-apply {
-            flex: 1;
-            background: var(--primary);
-            color: white;
-        }
-        
-        .btn-save {
-            padding: 1rem;
-            background: transparent;
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-        }
-        
-        .btn-save:hover {
-            border-color: var(--primary);
-            color: var(--primary);
-        }
-        
-        /* Hero Section - Dramatically Improved */
-        .hero {
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 8rem 2rem 4rem;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .hero-content {
-            text-align: center;
-            max-width: 900px;
-            animation: heroFadeIn 1s ease-out;
-        }
-        
-        @keyframes heroFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .hero-subtitle {
-            font-size: clamp(1.1rem, 2vw, 1.5rem);
-            color: var(--text-muted);
-            margin: 2rem 0 3rem;
-            animation: heroFadeIn 1s ease-out 0.2s both;
-        }
-        
-        .hero-cta {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            animation: heroFadeIn 1s ease-out 0.4s both;
-        }
-        
-        /* Quick Start - INSTANT VALUE */
-        .quick-start {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 3rem;
-            max-width: 600px;
-            margin: 4rem auto;
-            animation: slideUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(40px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .quick-start-header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        
-        .interest-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 1rem;
-            margin: 2rem 0;
-        }
-        
-        .interest-card {
-            background: transparent;
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem 1rem;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .interest-card:hover {
-            border-color: var(--primary);
-            transform: scale(1.05);
-        }
-        
-        .interest-card.selected {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            border-color: var(--primary);
-            box-shadow: 0 8px 24px rgba(255, 107, 53, 0.4);
-        }
-        
-        .interest-icon {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .interest-label {
-            font-size: 0.875rem;
-            font-weight: 600;
-        }
-        
-        /* Grid System */
-        .grid {
-            display: grid;
-            gap: 1.5rem;
-        }
-        
-        .grid-cols-1 {
-            grid-template-columns: 1fr;
-        }
-        
-        @media (min-width: 768px) {
-            .grid-cols-md-2 {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .grid-cols-md-3 {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-        
-        /* Container */
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-        
-        .section {
-            padding: 6rem 2rem;
-            position: relative;
-            z-index: 1;
-        }
-        
-        /* Stats */
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 2rem;
-            margin: 4rem 0;
-        }
-        
-        .stat {
-            text-align: center;
-            padding: 2rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            transition: all 0.3s;
-        }
-        
-        .stat:hover {
-            transform: translateY(-4px);
-            border-color: var(--primary);
-        }
-        
-        .stat-value {
-            font-family: 'Syne', sans-serif;
-            font-size: 3rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            display: block;
-        }
-        
-        .stat-label {
-            color: var(--text-muted);
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
-        }
-        
-        /* Filters - Streamlined */
-        .filters {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-            padding: 2rem 0;
-            position: sticky;
-            top: 80px;
-            background: var(--bg-dark);
-            z-index: 10;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        .filter-pill {
-            padding: 0.75rem 1.5rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .filter-pill:hover,
-        .filter-pill.active {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: white;
-        }
-        
-        /* Loading Animation */
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 4rem;
-        }
-        
-        .loading-spinner {
-            width: 48px;
-            height: 48px;
-            border: 3px solid var(--border);
-            border-top-color: var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Toast Notifications */
-        .toast {
-            position: fixed;
-            bottom: 2rem;
-            right: 2rem;
-            padding: 1rem 1.5rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-            animation: toastSlide 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 2000;
-        }
-        
-        @keyframes toastSlide {
-            from {
-                transform: translateX(400px);
-            }
-            to {
-                transform: translateX(0);
-            }
-        }
-        
-        .toast-success {
-            border-left: 4px solid var(--success);
-        }
-        
-        .toast-error {
-            border-left: 4px solid var(--primary);
-        }
-        
-        /* Pro Banner */
-        .pro-banner {
-            background: linear-gradient(135deg, rgba(255, 107, 53, 0.1) 0%, rgba(0, 217, 255, 0.1) 100%);
-            border: 1px solid var(--primary);
-            border-radius: 16px;
-            padding: 2rem;
-            text-align: center;
-            margin: 2rem 0;
-        }
-        
-        .pro-features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin: 2rem 0;
-        }
-        
-        .pro-feature {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            text-align: left;
-            transition: all 0.3s;
-        }
-        
-        .pro-feature:hover {
-            border-color: var(--primary);
-            transform: translateY(-4px);
-        }
-        
-        .pro-feature-icon {
-            font-size: 2rem;
-            margin-bottom: 1rem;
-        }
-        
-        /* Mobile Optimization */
-        @media (max-width: 768px) {
-            .nav-links {
-                display: none;
-            }
-            
-            .hero {
-                padding: 6rem 1rem 3rem;
-            }
-            
-            .quick-start {
-                padding: 2rem 1.5rem;
-            }
-            
-            .interest-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
-        
-        /* Utility Classes */
-        .text-center { text-align: center; }
-        .text-muted { color: var(--text-muted); }
-        .mt-1 { margin-top: 0.5rem; }
-        .mt-2 { margin-top: 1rem; }
-        .mt-3 { margin-top: 1.5rem; }
-        .mt-4 { margin-top: 2rem; }
-        .mb-1 { margin-bottom: 0.5rem; }
-        .mb-2 { margin-bottom: 1rem; }
-        .mb-3 { margin-bottom: 1.5rem; }
-        .mb-4 { margin-bottom: 2rem; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Radar — AI Opportunity Discovery for Africa</title>
+  <meta name="description" content="Radar helps ambitious professionals discover jobs, grants, fellowships, and consultancies matched to their profile in seconds." />
+  <meta name="theme-color" content="#ff6b35" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #080808;
+      --card: #121212;
+      --text: #f8f8f8;
+      --muted: #b0b0b0;
+      --border: #2a2a2a;
+      --primary: #ff6b35;
+      --primary-dark: #df4f1b;
+      --secondary: #21d4fd;
+      --success: #20d68f;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 0%, #1b1b1b 0%, var(--bg) 45%);
+      line-height: 1.5;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    .container { width: min(1120px, 92%); margin: 0 auto; }
+    .pill {
+      display: inline-block;
+      padding: .38rem .75rem;
+      border: 1px solid rgba(33,212,253,.35);
+      color: #a8ecff;
+      border-radius: 999px;
+      font-size: .78rem;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(12px);
+      background: rgba(8,8,8,.76);
+      border-bottom: 1px solid var(--border);
+      z-index: 20;
+    }
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .9rem 0;
+    }
+    .brand {
+      font-family: Syne, sans-serif;
+      font-weight: 800;
+      font-size: 1.35rem;
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+    }
+    .brand-mark {
+      width: 2rem; height: 2rem;
+      border-radius: .6rem;
+      background: linear-gradient(135deg,var(--primary),var(--secondary));
+      display: grid; place-items: center;
+      font-weight: 800;
+      color: #000;
+    }
+    .nav-links { display: flex; gap: 1.4rem; color: var(--muted); font-size: .95rem; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .45rem;
+      border-radius: .8rem;
+      border: 1px solid transparent;
+      padding: .85rem 1.15rem;
+      font-weight: 600;
+      transition: .2s ease;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg,var(--primary),var(--primary-dark));
+      box-shadow: 0 12px 30px rgba(255,107,53,.3);
+    }
+    .btn-primary:hover { transform: translateY(-1px); }
+    .btn-outline {
+      border-color: var(--border);
+      background: #111;
+      color: var(--text);
+    }
+
+    .hero {
+      padding: 5.4rem 0 3.4rem;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 2rem;
+      align-items: center;
+    }
+    h1 {
+      font-family: Syne, sans-serif;
+      font-size: clamp(2.3rem,6vw,4.2rem);
+      line-height: .98;
+      letter-spacing: -.02em;
+      margin: .95rem 0 1.3rem;
+    }
+    .lead { color: var(--muted); font-size: 1.08rem; max-width: 56ch; }
+    .cta-row { display: flex; gap: .75rem; margin-top: 1.6rem; flex-wrap: wrap; }
+
+    .hero-card {
+      background: linear-gradient(165deg,#191919,#121212);
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      padding: 1.2rem;
+    }
+    .match-row {
+      display: flex; justify-content: space-between;
+      align-items: center; padding: .8rem 0;
+      border-bottom: 1px solid #212121;
+    }
+    .match-row:last-child { border-bottom: none; }
+    .score { color: var(--success); font-weight: 700; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4,1fr);
+      gap: .9rem;
+      margin: 2.2rem 0 1.2rem;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: .9rem;
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat b { display: block; font-size: 1.45rem; font-family: Syne, sans-serif; }
+    .stat span { color: var(--muted); font-size: .85rem; }
+
+    section { padding: 3.6rem 0; }
+    .section-title {
+      font-family: Syne, sans-serif;
+      font-size: clamp(1.6rem,3vw,2.35rem);
+      margin-bottom: .7rem;
+    }
+    .section-subtitle { color: var(--muted); max-width: 60ch; }
+
+    .feature-grid {
+      display: grid;
+      margin-top: 1.4rem;
+      grid-template-columns: repeat(3,1fr);
+      gap: .95rem;
+    }
+    .feature {
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 1rem;
+      padding: 1.1rem;
+    }
+    .feature h3 { margin-bottom: .35rem; }
+    .feature p { color: var(--muted); font-size: .95rem; }
+
+    .pricing {
+      border: 1px solid rgba(255,107,53,.5);
+      background: linear-gradient(165deg, rgba(255,107,53,.13), rgba(18,18,18,.9));
+      border-radius: 1rem;
+      padding: 1.35rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .price { font-family: Syne, sans-serif; font-size: 2.4rem; line-height: 1; }
+
+    .faq details {
+      background: #101010;
+      border: 1px solid var(--border);
+      border-radius: .8rem;
+      padding: .85rem 1rem;
+      margin-top: .7rem;
+    }
+    .faq p { color: var(--muted); margin-top: .55rem; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2.2rem 0;
+      color: var(--muted);
+      margin-top: 3rem;
+      text-align: center;
+      font-size: .9rem;
+    }
+
+    @media (max-width: 930px) {
+      .hero { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2,1fr); }
+      .feature-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
 </head>
 <body>
-    <div class="animated-bg"></div>
-    <div id="root"></div>
+  <header>
+    <div class="container nav">
+      <a class="brand" href="#">
+        <span class="brand-mark">R</span>
+        Radar
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn-outline" href="#pricing">Get Pro</a>
+    </div>
+  </header>
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+  <main class="container">
+    <section class="hero" id="top">
+      <div>
+        <span class="pill">Built for Africa's global talent</span>
+        <h1>Find better opportunities in less than 30 seconds.</h1>
+        <p class="lead">Radar scans high-quality jobs, fellowships, grants, and consultancies — then ranks them using AI based on your goals, location, and strengths.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#pricing">Start Free →</a>
+          <a class="btn btn-outline" href="#features">See features</a>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <h3 style="margin-bottom:.6rem;">Today's top matches</h3>
+        <div class="match-row"><span>Product Designer · Nairobi</span><span class="score">96%</span></div>
+        <div class="match-row"><span>Climate Fellowship · Remote</span><span class="score">93%</span></div>
+        <div class="match-row"><span>Data Analyst · Lagos</span><span class="score">91%</span></div>
+        <div class="match-row"><span>Policy Consultant · Hybrid</span><span class="score">88%</span></div>
+      </aside>
+    </section>
 
-        // Mock Data Generator
-        const generateMockData = () => {
-            const types = ['Job', 'Fellowship', 'Consultancy', 'Grant', 'Tender'];
-            const countries = ['Kenya', 'Nigeria', 'South Africa', 'Ghana', 'Egypt', 'Rwanda'];
-            const organizations = [
-                'African Development Bank',
-                'World Bank',
-                'Google Africa',
-                'Mastercard Foundation',
-                'Safaricom',
-                'Flutterwave',
-                'Andela',
-                'Jumia'
-            ];
-            
-            const opportunities = [];
-            for (let i = 1; i <= 50; i++) {
-                const type = types[Math.floor(Math.random() * types.length)];
-                const country = countries[Math.floor(Math.random() * countries.length)];
-                const org = organizations[Math.floor(Math.random() * organizations.length)];
-                const remote = Math.random() > 0.6;
-                const matchScore = Math.random() > 0.4 ? Math.floor(Math.random() * 30) + 70 : null;
-                
-                opportunities.push({
-                    id: i,
-                    title: `${type === 'Job' ? 'Senior' : ''} ${type} - ${['Technology', 'Finance', 'Development', 'Research'][Math.floor(Math.random() * 4)]}`,
-                    organization: org,
-                    country: country,
-                    type: type,
-                    remote: remote,
-                    description: `Join ${org} and make real impact across Africa.`,
-                    matchScore: matchScore,
-                    deadline: new Date(Date.now() + Math.random() * 60 * 24 * 60 * 60 * 1000),
-                    createdAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000)
-                });
-            }
-            
-            return opportunities.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-        };
+    <div class="stats">
+      <div class="stat"><b>2,847</b><span>Live opportunities</span></div>
+      <div class="stat"><b>12K+</b><span>Users matched</span></div>
+      <div class="stat"><b>94%</b><span>Match quality</span></div>
+      <div class="stat"><b>54</b><span>African markets covered</span></div>
+    </div>
 
-        // Storage Helper
-        const useLocalStorage = (key, initialValue) => {
-            const [storedValue, setStoredValue] = useState(() => {
-                try {
-                    const item = window.localStorage.getItem(key);
-                    return item ? JSON.parse(item) : initialValue;
-                } catch (error) {
-                    return initialValue;
-                }
-            });
+    <section id="features">
+      <h2 class="section-title">Why Radar converts faster</h2>
+      <p class="section-subtitle">Built to remove noise and surface opportunities you can actually win.</p>
+      <div class="feature-grid">
+        <article class="feature"><h3>AI Fit Scoring</h3><p>Every listing is ranked by profile fit, freshness, and role intent so you focus where you have strongest odds.</p></article>
+        <article class="feature"><h3>Autopilot Alerts</h3><p>Get instant email/SMS digests with your best matches before they become crowded.</p></article>
+        <article class="feature"><h3>One-click Apply Kit</h3><p>Generate tailored resume bullets and cover letter drafts directly from the opportunity page.</p></article>
+        <article class="feature"><h3>Africa-first Discovery</h3><p>Radar prioritizes opportunities relevant to local realities, relocation goals, and cross-border talent.</p></article>
+        <article class="feature"><h3>Referral Growth Loop</h3><p>Invite friends, unlock premium benefits, and accelerate your network-led job discovery.</p></article>
+        <article class="feature"><h3>Mobile-friendly PWA</h3><p>Use Radar like an app on Android/iOS with lightweight performance and offline-friendly pages.</p></article>
+      </div>
+    </section>
 
-            const setValue = (value) => {
-                try {
-                    setStoredValue(value);
-                    window.localStorage.setItem(key, JSON.stringify(value));
-                } catch (error) {
-                    console.error(error);
-                }
-            };
+    <section id="how">
+      <h2 class="section-title">How it works</h2>
+      <p class="section-subtitle">From sign up to shortlist in a few steps.</p>
+      <div class="feature-grid">
+        <article class="feature"><h3>1) Tell us your goals</h3><p>Pick interests like jobs, grants, fellowships, or consulting and share your preferred locations.</p></article>
+        <article class="feature"><h3>2) Radar scans & ranks</h3><p>Our engine continuously ingests trusted sources and scores every listing for fit and urgency.</p></article>
+        <article class="feature"><h3>3) Apply smarter</h3><p>Use Pro tools to rewrite your CV, draft outreach, and track applications to interviews faster.</p></article>
+      </div>
+    </section>
 
-            return [storedValue, setValue];
-        };
+    <section id="pricing">
+      <div class="pricing">
+        <div>
+          <h2 class="section-title" style="margin-bottom:.3rem;">Radar Pro</h2>
+          <p class="section-subtitle">Lifetime access. No subscription. Includes AI career toolkit + priority opportunity feed.</p>
+          <p class="section-subtitle" id="localPricingMeta" style="margin-top:.4rem; font-size:.9rem;">
+            Base price: <strong>$49 USD</strong>
+          </p>
+        </div>
+        <div style="text-align:right;">
+          <div class="price" id="priceDisplay">$49</div>
+          <p class="section-subtitle" id="priceCountry" style="font-size:.86rem; margin:.25rem 0 .55rem;">USD pricing</p>
+          <a class="btn btn-primary" href="#top" id="upgradeBtn">Upgrade now</a>
+        </div>
+      </div>
+    </section>
 
-        // Toast Component
-        const Toast = ({ message, type, onClose }) => {
-            useEffect(() => {
-                const timer = setTimeout(onClose, 3000);
-                return () => clearTimeout(timer);
-            }, [onClose]);
+    <section id="faq" class="faq">
+      <h2 class="section-title">Frequently asked questions</h2>
+      <details><summary>Is Radar only for tech roles?</summary><p>No. Radar covers tech, policy, operations, design, consulting, research, and fellowship/grant opportunities.</p></details>
+      <details><summary>Can I use Radar without a resume?</summary><p>Yes. You can start with interest tags and add your resume later for stronger personalization.</p></details>
+      <details><summary>Do you support SMS alerts?</summary><p>Yes — SMS alerts are available in Pro along with advanced filtering and AI application support.</p></details>
+    </section>
+  </main>
 
-            return (
-                <div className={`toast toast-${type}`}>
-                    {message}
-                </div>
-            );
-        };
+  <footer>
+    © <span id="year"></span> Radar by Tuku-Tuku Innovation Labs · hello@tuku-tuku.com
+  </footer>
 
-        // Navigation Component
-        const Navigation = ({ currentView, setCurrentView, user }) => {
-            return (
-                <nav className="nav">
-                    <div className="nav-content">
-                        <a href="#" className="logo" onClick={(e) => { e.preventDefault(); setCurrentView('home'); }}>
-                            <div className="logo-icon">R</div>
-                            Radar
-                        </a>
-                        <div className="nav-links">
-                            <a href="#" className={`nav-link ${currentView === 'opportunities' ? 'active' : ''}`}
-                               onClick={(e) => { e.preventDefault(); setCurrentView('opportunities'); }}>
-                                Opportunities
-                            </a>
-                            {user && (
-                                <>
-                                    <a href="#" className={`nav-link ${currentView === 'matches' ? 'active' : ''}`}
-                                       onClick={(e) => { e.preventDefault(); setCurrentView('matches'); }}>
-                                        My Matches
-                                    </a>
-                                    {user.isPro ? (
-                                        <span className="badge badge-pro">PRO</span>
-                                    ) : (
-                                        <a href="#" className={`nav-link ${currentView === 'pro' ? 'active' : ''}`}
-                                           onClick={(e) => { e.preventDefault(); setCurrentView('pro'); }}>
-                                            Go Pro
-                                        </a>
-                                    )}
-                                </>
-                            )}
-                            {!user ? (
-                                <button className="btn btn-primary btn-sm" onClick={() => setCurrentView('start')}>
-                                    Start Now
-                                </button>
-                            ) : (
-                                <button className="btn btn-ghost btn-sm" onClick={() => window.location.reload()}>
-                                    Sign Out
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </nav>
-            );
-        };
+  <script>
+    const BASE_USD_PRICE = 49;
 
-        // Hero Component
-        const Hero = ({ setCurrentView }) => {
-            return (
-                <section className="hero">
-                    <div className="hero-content">
-                        <h1 className="heading-hero">
-                            Find Your Next <span className="gradient-text">Opportunity</span>
-                        </h1>
-                        <p className="hero-subtitle">
-                            AI-powered matching for Africa's best jobs, fellowships, and funding. No endless scrolling. Just opportunities that fit you.
-                        </p>
-                        <div className="hero-cta">
-                            <button className="btn btn-primary" onClick={() => setCurrentView('start')}>
-                                Start in 30 Seconds →
-                            </button>
-                            <button className="btn btn-secondary" onClick={() => setCurrentView('opportunities')}>
-                                Browse Opportunities
-                            </button>
-                        </div>
-                        
-                        <div className="stats">
-                            <div className="stat">
-                                <span className="stat-value">2,847</span>
-                                <span className="stat-label">Active Opportunities</span>
-                            </div>
-                            <div className="stat">
-                                <span className="stat-value">12K+</span>
-                                <span className="stat-label">Users Matched</span>
-                            </div>
-                            <div className="stat">
-                                <span className="stat-value">94%</span>
-                                <span className="stat-label">Match Accuracy</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            );
-        };
+    const FALLBACK_CURRENCY_BY_COUNTRY = {
+      NG: 'NGN', KE: 'KES', ZA: 'ZAR', GH: 'GHS', EG: 'EGP', RW: 'RWF', UG: 'UGX', TZ: 'TZS',
+      MA: 'MAD', CM: 'XAF', SN: 'XOF', CI: 'XOF', ET: 'ETB'
+    };
 
-        // Quick Start - INSTANT ONBOARDING
-        const QuickStart = ({ setCurrentView, setUser }) => {
-            const [selectedInterests, setSelectedInterests] = useState([]);
-            const [email, setEmail] = useState('');
-            const [loading, setLoading] = useState(false);
+    function formatMoney(amount, currency) {
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: 'currency',
+          currency,
+          maximumFractionDigits: amount >= 1000 ? 0 : 2
+        }).format(amount);
+      } catch {
+        return `${currency} ${amount.toFixed(2)}`;
+      }
+    }
 
-            const interests = [
-                { id: 'jobs', icon: '💼', label: 'Jobs' },
-                { id: 'fellowships', icon: '🎓', label: 'Fellowships' },
-                { id: 'grants', icon: '💰', label: 'Grants' },
-                { id: 'consultancy', icon: '🤝', label: 'Consultancy' }
-            ];
+    async function localizePricing() {
+      const priceDisplay = document.getElementById('priceDisplay');
+      const priceCountry = document.getElementById('priceCountry');
+      const localPricingMeta = document.getElementById('localPricingMeta');
 
-            const toggleInterest = (id) => {
-                setSelectedInterests(prev => 
-                    prev.includes(id) 
-                        ? prev.filter(i => i !== id)
-                        : [...prev, id]
-                );
-            };
+      if (!priceDisplay || !priceCountry || !localPricingMeta) return;
 
-            const handleStart = () => {
-                if (selectedInterests.length === 0 || !email) return;
-                
-                setLoading(true);
-                
-                // Simulate instant account creation
-                setTimeout(() => {
-                    const newUser = {
-                        id: '1',
-                        email: email,
-                        interests: selectedInterests,
-                        isPro: false,
-                        referralCode: Math.random().toString(36).substring(7)
-                    };
-                    
-                    setUser(newUser);
-                    setCurrentView('matches');
-                }, 1000);
-            };
+      let countryName = 'your region';
+      let countryCode = '';
+      let currency = 'USD';
 
-            return (
-                <div className="section">
-                    <div className="quick-start">
-                        <div className="quick-start-header">
-                            <h2 className="heading-lg">What are you looking for?</h2>
-                            <p className="text-muted mt-2">Select all that interest you</p>
-                        </div>
-                        
-                        <div className="interest-grid">
-                            {interests.map(interest => (
-                                <div 
-                                    key={interest.id}
-                                    className={`interest-card ${selectedInterests.includes(interest.id) ? 'selected' : ''}`}
-                                    onClick={() => toggleInterest(interest.id)}
-                                >
-                                    <div className="interest-icon">{interest.icon}</div>
-                                    <div className="interest-label">{interest.label}</div>
-                                </div>
-                            ))}
-                        </div>
+      try {
+        const geoRes = await fetch('https://ipapi.co/json/', { headers: { Accept: 'application/json' } });
+        if (geoRes.ok) {
+          const geo = await geoRes.json();
+          countryName = geo.country_name || countryName;
+          countryCode = geo.country_code || '';
+          currency = geo.currency || FALLBACK_CURRENCY_BY_COUNTRY[countryCode] || 'USD';
+        }
+      } catch {
+        // Keep USD fallback.
+      }
 
-                        <div style={{ marginTop: '2rem' }}>
-                            <input 
-                                type="email" 
-                                placeholder="Enter your email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '1rem',
-                                    background: 'var(--bg-dark)',
-                                    border: '1px solid var(--border)',
-                                    borderRadius: '12px',
-                                    color: 'var(--text-primary)',
-                                    fontSize: '1rem',
-                                    marginBottom: '1rem'
-                                }}
-                            />
-                            <button 
-                                className="btn btn-primary" 
-                                style={{ width: '100%' }}
-                                onClick={handleStart}
-                                disabled={selectedInterests.length === 0 || !email || loading}
-                            >
-                                {loading ? 'Creating your account...' : 'Show Me My Matches →'}
-                            </button>
-                            <p className="text-muted text-center mt-2" style={{ fontSize: '0.8rem' }}>
-                                No resume needed. We'll show you opportunities instantly.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
+      if (currency === 'USD') {
+        priceDisplay.textContent = '$49';
+        priceCountry.textContent = `USD pricing (${countryName})`;
+        localPricingMeta.innerHTML = 'Base price: <strong>$49 USD</strong>';
+        return;
+      }
 
-        // Opportunity Card Component
-        const OpportunityCard = ({ opportunity, user }) => {
-            const [saved, setSaved] = useState(false);
+      try {
+        const fxRes = await fetch('https://open.er-api.com/v6/latest/USD');
+        if (!fxRes.ok) throw new Error('FX request failed');
 
-            const formatDeadline = (date) => {
-                const days = Math.ceil((date - new Date()) / (1000 * 60 * 60 * 24));
-                if (days < 0) return 'Expired';
-                if (days === 0) return 'Today';
-                if (days === 1) return 'Tomorrow';
-                if (days < 7) return `${days}d left`;
-                return date.toLocaleDateString();
-            };
+        const fxData = await fxRes.json();
+        const rate = fxData?.rates?.[currency];
+        if (!rate) throw new Error('Missing currency rate');
 
-            return (
-                <div className="card card-hover opportunity-card">
-                    <div className="opportunity-header">
-                        <h3 className="opportunity-title">{opportunity.title}</h3>
-                        {opportunity.matchScore && (
-                            <div className="match-badge">
-                                ⚡ {opportunity.matchScore}%
-                            </div>
-                        )}
-                    </div>
-                    
-                    <div className="opportunity-meta">
-                        <div className="meta-item">
-                            <span>🏢</span>
-                            <span>{opportunity.organization}</span>
-                        </div>
-                        <div className="meta-item">
-                            <span>📍</span>
-                            <span>{opportunity.country}</span>
-                        </div>
-                        {opportunity.remote && <span className="badge badge-remote">Remote</span>}
-                        <span className="badge badge-type">{opportunity.type}</span>
-                        <div className="meta-item">
-                            <span>⏰</span>
-                            <span>{formatDeadline(opportunity.deadline)}</span>
-                        </div>
-                    </div>
+        const localAmount = BASE_USD_PRICE * rate;
+        priceDisplay.textContent = formatMoney(localAmount, currency);
+        priceCountry.textContent = `Estimated for ${countryName} (${currency})`;
+        localPricingMeta.innerHTML = `Charged in local currency where supported · Base: <strong>$49 USD</strong>`;
+      } catch {
+        priceDisplay.textContent = '$49';
+        priceCountry.textContent = `USD pricing (couldn't load ${currency} rate)`;
+        localPricingMeta.innerHTML = 'Base price: <strong>$49 USD</strong>';
+      }
+    }
 
-                    <div className="opportunity-actions">
-                        <button className="btn btn-primary btn-apply">
-                            Apply Now →
-                        </button>
-                        <button 
-                            className={`btn btn-save ${saved ? 'saved' : ''}`}
-                            onClick={() => setSaved(!saved)}
-                        >
-                            {saved ? '❤️' : '🤍'}
-                        </button>
-                    </div>
-                </div>
-            );
-        };
+    document.getElementById('year').textContent = new Date().getFullYear();
+    const upgradeBtn = document.getElementById('upgradeBtn');
+    upgradeBtn.addEventListener('click', () => {
+      upgradeBtn.textContent = 'Added to cart ✓';
+      setTimeout(() => {
+        upgradeBtn.textContent = 'Upgrade now';
+      }, 1800);
+    });
 
-        // Opportunities View
-        const OpportunitiesView = ({ user }) => {
-            const [opportunities] = useState(generateMockData());
-            const [filter, setFilter] = useState('all');
-
-            const filteredOpportunities = opportunities.filter(opp => {
-                if (filter === 'all') return true;
-                return opp.type === filter;
-            });
-
-            return (
-                <div className="section">
-                    <div className="container">
-                        <h1 className="heading-xl mb-4">
-                            {user ? 'Your Matched Opportunities' : 'All Opportunities'}
-                        </h1>
-                        
-                        <div className="filters">
-                            {['all', 'Job', 'Fellowship', 'Grant', 'Consultancy'].map(type => (
-                                <div 
-                                    key={type}
-                                    className={`filter-pill ${filter === type ? 'active' : ''}`}
-                                    onClick={() => setFilter(type)}
-                                >
-                                    {type === 'all' ? 'All' : type}s
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="grid grid-cols-1 grid-cols-md-2">
-                            {filteredOpportunities.map(opp => (
-                                <OpportunityCard 
-                                    key={opp.id} 
-                                    opportunity={opp} 
-                                    user={user}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // Pro View
-        const ProView = ({ user }) => {
-            const features = [
-                { icon: '🤖', title: 'AI Resume Rewrite', desc: 'Optimize for global opportunities' },
-                { icon: '✍️', title: 'Cover Letters', desc: 'Personalized for each job' },
-                { icon: '🎯', title: 'Priority Matching', desc: 'Get matched first' },
-                { icon: '⚡', title: 'Instant Alerts', desc: 'Before free users' },
-                { icon: '💬', title: 'Interview Prep', desc: 'AI-powered coaching' },
-                { icon: '📊', title: 'Application Tracking', desc: 'Never lose track' },
-                { icon: '📱', title: 'SMS Alerts', desc: 'Real-time updates' },
-                { icon: '📄', title: 'Export as PDF', desc: 'Take your matches anywhere' }
-            ];
-
-            return (
-                <div className="section">
-                    <div className="container" style={{ maxWidth: '900px' }}>
-                        <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-                            <h1 className="heading-xl mb-2">
-                                Upgrade to <span className="gradient-text">Radar Pro</span>
-                            </h1>
-                            <p className="text-muted" style={{ fontSize: '1.2rem' }}>
-                                One-time payment. Yours until you land your dream role.
-                            </p>
-                        </div>
-
-                        <div className="pro-features">
-                            {features.map((feature, i) => (
-                                <div key={i} className="pro-feature">
-                                    <div className="pro-feature-icon">{feature.icon}</div>
-                                    <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.5rem' }}>
-                                        {feature.title}
-                                    </h3>
-                                    <p className="text-muted" style={{ fontSize: '0.9rem' }}>
-                                        {feature.desc}
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div style={{ textAlign: 'center', marginTop: '3rem' }}>
-                            <div style={{ fontSize: '3rem', fontWeight: '800', marginBottom: '1rem' }}>
-                                $49
-                            </div>
-                            <p className="text-muted mb-3">One-time payment. No subscription.</p>
-                            <button className="btn btn-primary" style={{ fontSize: '1.1rem', padding: '1.25rem 3rem' }}>
-                                Upgrade Now →
-                            </button>
-                        </div>
-
-                        <div className="pro-banner mt-4">
-                            <h3 className="mb-2">Or invite 3 friends and get Pro free!</h3>
-                            <p className="text-muted mb-3">Share your referral link:</p>
-                            <code style={{ 
-                                display: 'block',
-                                padding: '1rem',
-                                background: 'var(--bg-dark)',
-                                borderRadius: '8px',
-                                marginTop: '1rem'
-                            }}>
-                                radar.app/signup?ref={user?.referralCode || 'abc123'}
-                            </code>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // Main App Component
-        const App = () => {
-            const [currentView, setCurrentView] = useState('home');
-            const [user, setUser] = useLocalStorage('radarUser', null);
-            const [toast, setToast] = useState(null);
-
-            useEffect(() => {
-                if (user && currentView === 'home') {
-                    setCurrentView('opportunities');
-                }
-            }, [user]);
-
-            const showToast = (message, type = 'success') => {
-                setToast({ message, type });
-            };
-
-            return (
-                <>
-                    <Navigation currentView={currentView} setCurrentView={setCurrentView} user={user} />
-                    
-                    {currentView === 'home' && !user && <Hero setCurrentView={setCurrentView} />}
-                    {currentView === 'start' && <QuickStart setCurrentView={setCurrentView} setUser={setUser} />}
-                    {currentView === 'opportunities' && <OpportunitiesView user={user} />}
-                    {currentView === 'matches' && user && <OpportunitiesView user={user} />}
-                    {currentView === 'pro' && user && <ProView user={user} />}
-                    
-                    {toast && (
-                        <Toast 
-                            message={toast.message} 
-                            type={toast.type} 
-                            onClose={() => setToast(null)} 
-                        />
-                    )}
-                </>
-            );
-        };
-
-        // Render the app
-        ReactDOM.render(<App />, document.getElementById('root'));
-    </script>
+    localizePricing();
+  </script>
 </body>
 </html>
