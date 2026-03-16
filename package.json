@@ -19,7 +19,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "build:homepage": "mkdir -p dist && cp public/index.html dist/index.html",
-    "serve:homepage": "python3 -m http.server 4173 --directory dist"
+    "serve:homepage": "python3 -m http.server 4173 --directory public"
   },
   "dependencies": {
     "@prisma/client": "^5.7.0",

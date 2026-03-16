@@ -86,7 +86,7 @@ Netlify settings:
 - **Build command:** `npm run build:homepage`
 - **Publish directory:** `dist`
 
-This repository also includes `netlify.toml` configured to run `npm run build:homepage`, publish `dist`, and apply SPA-style redirects.
+This repository also includes `netlify.toml` configured for static publishing and SPA-style redirects.
 
 ### Option 1: Vercel + Supabase (Recommended)
 
