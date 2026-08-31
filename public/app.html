@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#f6f7f4" />
+  <title>Radar — Opportunity Workspace</title>
+  <meta name="description" content="Discover, assess, save and track opportunities with Radar by Tuku-Tuku." />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/app"><span class="brand-mark">R</span><span><strong>Radar</strong><small>by Tuku-Tuku</small></span></a>
+      <nav class="nav" aria-label="Radar workspace">
+        <button class="nav-item active" data-view="discover"><span>⌕</span>Discover</button>
+        <button class="nav-item" data-view="saved"><span>♡</span>Saved</button>
+        <button class="nav-item" data-view="applications"><span>✓</span>Applications</button>
+        <button class="nav-item" data-view="profile"><span>◉</span>Your profile</button>
+      </nav>
+      <div class="sidebar-foot"><span class="live-dot"></span><span id="sourceStatus">Opportunity feed ready</span></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark">R</span><strong>Radar</strong></div>
+        <div class="global-search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search roles, grants, fellowships, organisations…" autocomplete="off" /></div>
+        <div class="top-actions">
+          <span id="sessionLabel" class="session-label">Browsing public opportunities</span>
+          <button id="authButton" class="button secondary">Sign in with Tuku</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section id="discoverView" class="view active">
+          <div class="page-head"><div><span class="eyebrow">Opportunity intelligence</span><h1>Find work worth pursuing.</h1><p>Search the live feed, then use fit intelligence to decide where to spend your application time.</p></div><div class="pulse"><span class="live-dot"></span>Live feed</div></div>
+          <div id="statsGrid" class="stats-grid" aria-live="polite"></div>
+          <div class="filters" role="search">
+            <select id="typeFilter" aria-label="Opportunity type"><option value="">All opportunity types</option><option value="job">Jobs</option><option value="consulting">Consulting</option><option value="fellowship">Fellowships</option><option value="grant">Grants</option><option value="internship">Internships</option></select>
+            <input id="countryFilter" placeholder="Country" aria-label="Country" />
+            <label class="check"><input id="remoteFilter" type="checkbox" />Remote only</label>
+            <button id="clearFilters" class="text-button">Clear</button>
+          </div>
+          <div class="content-grid"><section><div class="section-head"><div><h2>Best available opportunities</h2><p id="resultMeta">Loading the current feed…</p></div><button id="refreshButton" class="button secondary">Refresh</button></div><div id="opportunityList" class="opportunity-list"></div></section><aside id="detailPanel" class="detail-panel"><div class="empty-detail"><div class="empty-icon">↗</div><strong>Select an opportunity</strong><p>Open a listing to review the source, deadline, fit and next actions.</p></div></aside></div>
+        </section>
+
+        <section id="savedView" class="view"><div class="page-head compact"><div><span class="eyebrow">Shortlist</span><h1>Saved opportunities.</h1><p>Keep your strongest options together before you commit application time.</p></div></div><div id="savedList" class="opportunity-list wide"></div></section>
+        <section id="applicationsView" class="view"><div class="page-head compact"><div><span class="eyebrow">Pipeline</span><h1>Applications.</h1><p>Track each opportunity from planning through outcome.</p></div></div><div id="applicationList" class="application-list"></div></section>
+        <section id="profileView" class="view"><div class="page-head compact"><div><span class="eyebrow">Matching context</span><h1>Your Radar profile.</h1><p>Better context produces better rankings. Use concise, factual preferences.</p></div></div><form id="profileForm" class="profile-card"><div class="field"><label>Name</label><input id="profileName" /></div><div class="field"><label>Skills <small>comma separated</small></label><textarea id="profileSkills" rows="3" placeholder="Program design, MSME advisory, research…"></textarea></div><div class="field"><label>Industries <small>comma separated</small></label><textarea id="profileIndustries" rows="3" placeholder="Development, technology, agriculture…"></textarea></div><div class="field"><label>Preferred countries <small>comma separated</small></label><input id="profileCountries" placeholder="Uganda, Kenya, Remote" /></div><label class="check profile-check"><input id="profileRemote" type="checkbox" />Prioritise remote opportunities</label><div id="profileMessage" class="form-message"></div><button class="button primary" type="submit">Save matching profile</button></form></section>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
