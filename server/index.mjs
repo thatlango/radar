@@ -4,6 +4,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import pdfParse from 'pdf-parse';
+import {
+  RADAR_PLANS,
+  coreSubscriptionCatalog,
+  resolvedPlan,
+  usageSnapshot,
+  recordUsage,
+  enforceLimit,
+  subscriptionEnforcementEnabled,
+} from './subscriptions.mjs';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -88,6 +97,70 @@ function publicUser(user) {
     onboardingComplete: user.onboardingComplete, preferences, isPro: user.isPro,
     resume: { uploaded: Boolean(user.resumeText), fileName: user.resumeUrl || null },
   };
+}
+
+async function coreRequest(pathname, init = {}) {
+  const response = await fetch(`${CORE_INTERNAL_URL}${pathname}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', accept: 'application/json', ...(init.headers || {}) },
+    signal: AbortSignal.timeout(15000),
+  });
+  const raw = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = raw?.error ?? raw?.data?.error ?? raw;
+    throw Object.assign(new Error(detail?.message || raw?.message || 'Tuku Auth could not complete this request.'), { status: response.status, code: detail?.code || 'TUKU_AUTH_FAILED' });
+  }
+  return raw?.data ?? raw;
+}
+async function persistRadarCoreSession(core, res) {
+  if (!core?.authenticated || core?.authorization?.productCode !== 'radar' || !core?.identity?.coreUserId || !core?.identity?.email) {
+    throw Object.assign(new Error('Tuku Core returned an invalid Radar identity.'), { status: 403, code: 'PRODUCT_ACCESS_DENIED' });
+  }
+  let user = await prisma.user.findUnique({ where: { coreUserId: core.identity.coreUserId } });
+  if (!user) user = await prisma.user.findUnique({ where: { email: String(core.identity.email).toLowerCase() } });
+  const data = {
+    coreUserId: core.identity.coreUserId,
+    email: String(core.identity.email).toLowerCase(),
+    emailVerified: core.identity.emailVerified === true,
+    phone: core.identity.phone || undefined,
+    lastLoginAt: new Date(),
+  };
+  user = user
+    ? await prisma.user.update({ where: { id: user.id }, data })
+    : await prisma.user.create({ data: { ...data, name: String(core.identity.name || core.identity.email).split('@')[0], parsedSkills: [], parsedIndustries: [] } });
+  const id = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600000);
+  await prisma.radarSession.create({ data: { id, userId: user.id, coreOrganizationId: core.authorization.organizationId || null, coreBusinessId: core.authorization.businessId || null, coreAccess: core.authorization.access || undefined, corePermissionCodes: cleanList(core.authorization.permissionCodes, 120), expiresAt } });
+  setSessionCookie(res, id, expiresAt);
+  return { authenticated: true, user: publicUser(user), organizationId: core.authorization.organizationId, businessId: core.authorization.businessId || null };
+}
+async function exchangeRadarCode(code, codeVerifier) {
+  return coreRequest('/api/v1/sso/exchange', {
+    method: 'POST',
+    body: JSON.stringify({ clientId: CLIENT_ID, code, redirectUri: REDIRECT_URI, codeVerifier }),
+  });
+}
+async function embeddedRadarAuth({ mode, email, password, name }) {
+  const auth = mode === 'signup'
+    ? await coreRequest('/api/v1/auth/register', { method: 'POST', body: JSON.stringify({ email: String(email).trim().toLowerCase(), password, name: String(name || '').trim(), language: 'en', country: 'UG', consent: true, intent: 'exploring' }) })
+    : await coreRequest('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: String(email).trim().toLowerCase(), password }) });
+  if (!auth?.session?.accessToken) {
+    if (mode === 'signup' && auth?.emailConfirmationRequired) return { verificationRequired: true, core: null };
+    throw Object.assign(new Error('Tuku Auth did not establish an active account session.'), { status: 401, code: 'TUKU_SESSION_MISSING' });
+  }
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const state = crypto.randomBytes(24).toString('base64url');
+  const codeChallenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const authorization = await coreRequest('/api/v1/sso/authorize', {
+    method: 'POST', headers: { authorization: `Bearer ${auth.session.accessToken}` },
+    body: JSON.stringify({ clientId: CLIENT_ID, redirectUri: REDIRECT_URI, state, codeChallenge, codeChallengeMethod: 'S256' }),
+  });
+  const returned = new URL(String(authorization?.redirectUrl || ''));
+  const expected = new URL(REDIRECT_URI);
+  if (returned.origin !== expected.origin || returned.pathname !== expected.pathname || returned.searchParams.get('state') !== state) {
+    throw Object.assign(new Error('Tuku Auth returned an invalid Radar hand-off.'), { status: 401, code: 'TUKU_AUTHORIZE_FAILED' });
+  }
+  return { verificationRequired: false, core: await exchangeRadarCode(returned.searchParams.get('code') || '', verifier) };
 }
 function opportunityView(row, extra = {}) {
   return {
@@ -233,6 +306,62 @@ app.get('/ready', async (_req, res) => {
 app.get('/api/config', (_req, res) => res.json({ coreUrl: CORE_BROWSER_URL, clientId: CLIENT_ID, redirectUri: REDIRECT_URI, milestone: 'opportunity-os', aiConfigured: Boolean(AI_KEY) }));
 app.get('/api/scan-profiles', (_req, res) => res.json({ items: SCAN_PRESETS }));
 
+app.get('/api/subscriptions/plans', async (_req, res) => {
+  const core = await coreSubscriptionCatalog(CORE_INTERNAL_URL);
+  res.json({
+    providerConfigured: core.providerConfigured,
+    checkoutAvailable: core.checkoutAvailable,
+    enforcementEnabled: subscriptionEnforcementEnabled(),
+    authority: 'tuku-core',
+    plans: RADAR_PLANS,
+    corePlans: core.corePlans,
+  });
+});
+app.post('/api/subscriptions/checkout', requireSession, async (req, res, next) => {
+  try {
+    const planCode = String(req.body?.planCode || '');
+    const plan = RADAR_PLANS.find((item) => item.code === planCode);
+    if (!plan || !plan.checkout) return res.status(400).json({ error: { code: 'PLAN_NOT_CHECKOUTABLE', message: 'Choose a checkout-enabled Radar plan.' } });
+    const core = await coreSubscriptionCatalog(CORE_INTERNAL_URL);
+    if (!core.checkoutAvailable) {
+      return res.status(503).json({ error: { code: 'CHECKOUT_NOT_CONFIGURED', message: 'Radar subscription checkout is scaffolded but the Tuku billing provider is not configured yet.', details: { planCode } } });
+    }
+    return res.status(501).json({ error: { code: 'CHECKOUT_PROVIDER_PENDING', message: 'Tuku billing reports checkout availability, but the Radar checkout adapter has not been enabled in this deployment.' } });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/auth/credentials', async (req, res, next) => {
+  try {
+    const mode = req.body?.mode === 'signup' ? 'signup' : 'signin';
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+    const name = String(req.body?.name || '').trim();
+    if (!email.includes('@')) return res.status(400).json({ error: { code: 'INVALID_EMAIL', message: 'Enter a valid email address.' } });
+    if (password.length < 8) return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'Use at least 8 characters for your password.' } });
+    if (mode === 'signup' && name.length < 2) return res.status(400).json({ error: { code: 'NAME_REQUIRED', message: 'Enter your name.' } });
+    const result = await embeddedRadarAuth({ mode, email, password, name });
+    if (result.verificationRequired || !result.core) return res.status(202).json({ authenticated: false, verificationRequired: true });
+    res.json({ ...(await persistRadarCoreSession(result.core, res)), verificationRequired: false });
+  } catch (error) { next(error); }
+});
+app.post('/api/auth/forgot-password', async (req, res, next) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email.includes('@')) return res.status(400).json({ error: { code: 'INVALID_EMAIL', message: 'Enter a valid email address.' } });
+    await coreRequest('/api/v1/auth/forgot-password', { method: 'POST', body: JSON.stringify({ channel: 'email', identifier: email, redirectTo: 'https://radar.tukutuku.org/app?reset_password=1' }) });
+    res.status(202).json({ accepted: true });
+  } catch (error) { next(error); }
+});
+app.post('/api/auth/reset-password', async (req, res, next) => {
+  try {
+    const recoveryToken = String(req.body?.recoveryToken || '').trim();
+    const password = String(req.body?.password || '');
+    if (!recoveryToken || password.length < 8) return res.status(400).json({ error: { code: 'INVALID_RESET', message: 'This reset link is invalid or the new password is too short.' } });
+    await coreRequest('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify({ recoveryToken, password }) });
+    res.json({ completed: true });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/auth/tuku/exchange', async (req, res, next) => {
   try {
     const { code, codeVerifier } = req.body || {};
@@ -253,7 +382,7 @@ app.post('/api/auth/tuku/exchange', async (req, res, next) => {
     user = user ? await prisma.user.update({ where: { id: user.id }, data }) : await prisma.user.create({ data: { ...data, name: String(core.identity.email).split('@')[0], parsedSkills: [], parsedIndustries: [] } });
     const id = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600000);
-    await prisma.radarSession.create({ data: { id, userId: user.id, coreOrganizationId: core.authorization.organizationId || null, coreBusinessId: core.authorization.businessId || null, expiresAt } });
+    await prisma.radarSession.create({ data: { id, userId: user.id, coreOrganizationId: core.authorization.organizationId || null, coreBusinessId: core.authorization.businessId || null, coreAccess: core.authorization.access || undefined, corePermissionCodes: cleanList(core.authorization.permissionCodes, 120), expiresAt } });
     setSessionCookie(res, id, expiresAt);
     res.json({ authenticated: true, user: publicUser(user), organizationId: core.authorization.organizationId, businessId: core.authorization.businessId || null });
   } catch (error) { next(error); }
@@ -266,7 +395,7 @@ app.post('/api/auth/logout', async (req, res) => {
 app.get('/api/session', async (req, res) => {
   const s = await sessionFor(req);
   if (!s) return res.status(401).json({ authenticated: false });
-  res.json({ authenticated: true, user: publicUser(s.user), organizationId: s.coreOrganizationId, businessId: s.coreBusinessId });
+  res.json({ authenticated: true, user: publicUser(s.user), organizationId: s.coreOrganizationId, businessId: s.coreBusinessId, access: s.coreAccess || null, permissionCodes: s.corePermissionCodes || [] });
 });
 
 app.get('/api/opportunities', async (req, res, next) => {
@@ -285,6 +414,11 @@ app.get('/api/opportunities', async (req, res, next) => {
       ...(remote === 'true' ? [{ remote: true }] : []),
     ] };
     const session = await sessionFor(req);
+    if (session) {
+      const usage = await usageSnapshot(prisma, session.userId);
+      await enforceLimit({ prisma, session, metric: 'searches', currentCount: usage.searches });
+      await recordUsage(prisma, session.userId, 'searches');
+    }
     const rows = await prisma.opportunity.findMany({ where, orderBy: [{ qualityScore: 'desc' }, { deadline: 'asc' }, { createdAt: 'desc' }], take: Math.min(100, take * 2) });
     const filtered = minValue > 0 ? rows.filter((r) => Number(String(r.salary || '').replace(/[^0-9.]/g, '')) >= minValue) : rows;
     const saved = session ? new Set((await prisma.savedOpportunity.findMany({ where: { userId: session.userId }, select: { opportunityId: true } })).map((x) => x.opportunityId)) : new Set();
@@ -440,6 +574,8 @@ app.post('/api/opportunities/:id/workspace', requireSession, async (req, res, ne
     if (!opportunity) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
     let workspace = await prisma.opportunityWorkspace.findUnique({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: opportunity.id } }, include: { opportunity: true, documents: true, members: true, comments: true } });
     if (!workspace) {
+      const workspaceCount = await prisma.opportunityWorkspace.count({ where: { userId: req.radarSession.userId, status: { notIn: ['closed'] } } });
+      await enforceLimit({ prisma, session: req.radarSession, metric: 'workspaces', resourceCount: workspaceCount });
       workspace = await prisma.$transaction(async (tx) => {
         const created = await tx.opportunityWorkspace.create({ data: { userId: req.radarSession.userId, opportunityId: opportunity.id, name: String(req.body?.name || `${opportunity.title} — Application`).slice(0, 180), submissionDeadline: opportunity.deadline || null } });
         await tx.workspaceDocument.createMany({ data: seededDocumentSpecs(opportunity.type).map(([title, kind]) => ({ workspaceId: created.id, title, kind, status: 'pending' })) });
@@ -510,9 +646,12 @@ app.post('/api/workspaces/:id/documents/:documentId/ai-draft', requireSession, a
     const document = workspace.documents.find((d) => d.id === req.params.documentId);
     if (!document) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
     const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const usage = await usageSnapshot(prisma, req.radarSession.userId);
+    await enforceLimit({ prisma, session: req.radarSession, metric: 'ai_drafts', currentCount: usage.aiDrafts });
     const library = await libraryContext(user.id, 10);
     const instruction = `Draft the workspace document titled "${document.title}". Use only facts in the supplied profile, opportunity and reusable document library. Never invent past performance, partners, team members, budgets, certifications, dates, references or eligibility. Where required information is absent, insert an explicit [NEEDS INPUT: ...] placeholder. Preserve a professional submission-ready structure. Do not claim the application has been submitted.`;
     const ai = await aiAssist(instruction, { profile: { name: user.name, skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), resumeText: String(user.resumeText || '').slice(0, 16000) }, opportunity: opportunityView(workspace.opportunity), reusableLibrary: library, otherWorkspaceDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status, content: String(d.content || '').slice(0, 4000) })), userInstruction: String(req.body?.instruction || '').slice(0, 4000) }, `radar-workspace-doc:${document.id}`, 'draft', 1800, 'background');
+    await recordUsage(prisma, req.radarSession.userId, 'ai_drafts');
     const updated = await prisma.workspaceDocument.update({ where: { id: document.id }, data: { content: ai.text, generatedByAi: true, status: 'review', version: { increment: 1 }, metadata: { ...safeJson(document.metadata), lastAiInteractionId: ai.interactionId || null, lastAiModel: ai.model || null } } });
     const docs = await prisma.workspaceDocument.findMany({ where: { workspaceId: workspace.id } });
     await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { progress: workspaceProgress(docs), status: 'review' } });
@@ -589,6 +728,7 @@ app.post('/api/workspaces/:id/members', requireSession, async (req, res, next) =
   try {
     const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
     if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    await enforceLimit({ prisma, session: req.radarSession, metric: 'collaboration' });
     const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 240);
     if (!email.includes('@')) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'A valid collaborator email is required.' } });
     const role = MEMBER_ROLES.has(String(req.body?.role)) ? String(req.body.role) : 'reviewer';
@@ -693,8 +833,32 @@ app.get('/api/me/analytics', requireSession, async (req, res, next) => {
 });
 app.get('/api/me/subscription', requireSession, async (req, res, next) => {
   try {
-    const payments = await prisma.payment.findMany({ where: { userId: req.radarSession.userId }, orderBy: { paymentDate: 'desc' }, take: 10 });
-    res.json({ plan: req.radarSession.user.isPro ? 'pro' : 'free', isPro: req.radarSession.user.isPro, payments: payments.map((p) => ({ id: p.id, amount: p.amount, currency: p.currency, status: p.status, type: p.type, paymentDate: p.paymentDate })) });
+    const [core, usage, payments, workspaceCount] = await Promise.all([
+      coreSubscriptionCatalog(CORE_INTERNAL_URL),
+      usageSnapshot(prisma, req.radarSession.userId),
+      prisma.payment.findMany({ where: { userId: req.radarSession.userId }, orderBy: { paymentDate: 'desc' }, take: 10 }),
+      prisma.opportunityWorkspace.count({ where: { userId: req.radarSession.userId, status: { notIn: ['closed'] } } }),
+    ]);
+    const resolved = resolvedPlan(req.radarSession, req.radarSession.user);
+    const limits = resolved.plan.limits;
+    res.json({
+      state: resolved.tier === 'starter' ? 'free' : (resolved.access?.subscriptionStatus || 'active'),
+      tier: resolved.tier,
+      plan: resolved.plan,
+      basis: resolved.basis,
+      tukuAccess: resolved.access,
+      providerConfigured: core.providerConfigured,
+      checkoutAvailable: core.checkoutAvailable,
+      enforcementEnabled: subscriptionEnforcementEnabled(),
+      usage: {
+        periodKey: usage.periodKey,
+        searches: { used: usage.searches, limit: limits.searches },
+        aiDrafts: { used: usage.aiDrafts, limit: limits.aiDrafts },
+        workspaces: { used: workspaceCount, limit: limits.workspaces },
+        collaboration: limits.collaboration,
+      },
+      payments: payments.map((p) => ({ id: p.id, amount: p.amount, currency: p.currency, status: p.status, type: p.type, paymentDate: p.paymentDate })),
+    });
   } catch (error) { next(error); }
 });
 
