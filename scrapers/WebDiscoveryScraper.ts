@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { BaseScraper, RawOpportunity, ScraperConfig } from './BaseScraper';
-import { buildDiscoveryQueries, getScanProfile, RADAR_SOURCE_CATALOG } from './scanProfiles';
+import { buildDiscoveryQueries, getScanProfile, RADAR_SOURCE_CATALOG, SCAN_PROFILES } from './scanProfiles';
 
 const prisma = new PrismaClient();
 
@@ -20,42 +20,45 @@ export class WebDiscoveryScraper extends BaseScraper {
   async fetch(): Promise<SearchResult[]> {
     const source = await prisma.scraperSource.findUnique({ where: { id: this.config.sourceId } });
     const config = (source?.config && typeof source.config === 'object' ? source.config : {}) as any;
-    const profile = getScanProfile(config.scanProfile || 'consulting-firm');
+    const requestedProfile = String(config.scanProfile || 'all');
+    const profiles = requestedProfile === 'all' || requestedProfile === 'consulting-firm'
+      ? SCAN_PROFILES
+      : [getScanProfile(requestedProfile)];
+
     const activeUsers = await prisma.user.findMany({
       where: { onboardingComplete: true, alerts: { some: { active: true } } },
       select: { parsedSkills: true, preferences: true },
-      take: 20,
+      take: 50,
     });
 
     const personalised = activeUsers.flatMap((user) => {
       const prefs = user.preferences && typeof user.preferences === 'object' ? user.preferences as any : {};
       const intent = String(prefs.whatLookingFor || '').trim();
       if (!intent) return [];
-      return buildDiscoveryQueries(profile, intent, user.parsedSkills || []).slice(0, 1);
+      const profile = getScanProfile(String(prefs.scanPreset || (prefs.profileType === 'firm' ? 'consulting-firm' : 'strong-fit-role')));
+      return buildDiscoveryQueries(profile, intent, user.parsedSkills || []).slice(0, 2);
     });
 
-    const baseQueries = buildDiscoveryQueries(profile);
+    const baseQueries = profiles.flatMap((profile) => buildDiscoveryQueries(profile).slice(0, 3));
+    const allKeywords = [...new Set(profiles.flatMap((profile) => profile.keywords))];
     const primaryDomains = RADAR_SOURCE_CATALOG.filter((s) => s.discovery === 'primary').map((s) => s.domain);
     const mandatoryDomains = ['linkedin.com', 'opportunitydesk.org', 'globalsouthopportunities.com'];
-    const domainQueries = mandatoryDomains.map((domain) => `site:${domain} (${profile.keywords.slice(0, 8).join(' OR ')}) (consultancy OR tender OR opportunity OR RFP OR EOI)`);
+    const discoveryTerms = allKeywords.slice(0, 14).map((term) => `"${term}"`).join(' OR ');
+    const domainQueries = mandatoryDomains.map((domain) => `site:${domain} (${discoveryTerms}) (consultancy OR tender OR opportunity OR RFP OR EOI OR grant OR job)`);
     const sectorDomainQueries = primaryDomains
       .filter((domain) => !mandatoryDomains.includes(domain))
-      .slice(0, 9)
-      .map((domain) => `site:${domain} (${profile.keywords.slice(0, 6).join(' OR ')}) (consultancy OR tender OR RFP OR EOI)`);
+      .slice(0, 14)
+      .map((domain) => `site:${domain} (${allKeywords.slice(0, 8).map((term) => `"${term}"`).join(' OR ')}) (consultancy OR tender OR RFP OR EOI OR "call for proposals")`);
 
-    const maxQueries = Math.max(4, Math.min(24, Number(process.env.RADAR_DISCOVERY_MAX_QUERIES || 14)));
+    const maxQueries = Math.max(6, Math.min(36, Number(process.env.RADAR_DISCOVERY_MAX_QUERIES || 24)));
     const queries = [...domainQueries, ...baseQueries, ...personalised, ...sectorDomainQueries]
       .filter((value, index, self) => value && self.indexOf(value) === index)
       .slice(0, maxQueries);
 
     const all: SearchResult[] = [];
     for (const query of queries) {
-      try {
-        const results = await this.search(query);
-        all.push(...results);
-      } catch (error) {
-        console.error('[WebDiscoveryScraper] Query failed:', query, error);
-      }
+      try { all.push(...await this.search(query)); }
+      catch (error) { console.error('[WebDiscoveryScraper] Query failed:', query, error); }
       await this.sleep(120);
     }
 
@@ -64,7 +67,7 @@ export class WebDiscoveryScraper extends BaseScraper {
       if (!item.url || byUrl.has(item.url)) continue;
       byUrl.set(item.url, item);
     }
-    return [...byUrl.values()].slice(0, Math.max(40, Number(process.env.RADAR_DISCOVERY_MAX_RESULTS || 120)));
+    return [...byUrl.values()].slice(0, Math.max(60, Number(process.env.RADAR_DISCOVERY_MAX_RESULTS || 180)));
   }
 
   normalize(item: SearchResult): RawOpportunity {
@@ -73,19 +76,16 @@ export class WebDiscoveryScraper extends BaseScraper {
     const domain = this.domainOf(item.url);
     const sourceMeta = RADAR_SOURCE_CATALOG.find((source) => domain.includes(source.domain));
     const organization = this.inferOrganization(title, description, sourceMeta?.name || item.sourceName || domain);
-    const deadline = this.extractDeadline(`${title} ${description}`);
-    const country = this.inferCountry(`${title} ${description}`);
-    const type = this.inferType(`${title} ${description}`);
-
     return {
       title,
       organization,
-      country,
-      type,
+      country: this.inferCountry(`${title} ${description}`),
+      type: this.inferType(`${title} ${description}`),
       remote: this.isRemote(`${title} ${description}`),
       description,
-      deadline,
+      deadline: this.extractDeadline(`${title} ${description}`),
       sourceUrl: item.url,
+      source: sourceMeta?.name || domain || 'Web discovery',
     };
   }
 
@@ -106,9 +106,7 @@ export class WebDiscoveryScraper extends BaseScraper {
     });
     if (!response.ok) throw new Error(`Brave Search returned ${response.status}`);
     const payload: any = await response.json();
-    return (payload?.web?.results || []).map((row: any) => ({
-      title: row.title || '', url: row.url || '', snippet: row.description || '', domain: this.domainOf(row.url || ''),
-    }));
+    return (payload?.web?.results || []).map((row: any) => ({ title: row.title || '', url: row.url || '', snippet: row.description || '', domain: this.domainOf(row.url || '') }));
   }
 
   private async searchSerper(query: string): Promise<SearchResult[]> {
@@ -120,9 +118,7 @@ export class WebDiscoveryScraper extends BaseScraper {
     });
     if (!response.ok) throw new Error(`Serper returned ${response.status}`);
     const payload: any = await response.json();
-    return (payload?.organic || []).map((row: any) => ({
-      title: row.title || '', url: row.link || '', snippet: row.snippet || '', domain: this.domainOf(row.link || ''),
-    }));
+    return (payload?.organic || []).map((row: any) => ({ title: row.title || '', url: row.link || '', snippet: row.snippet || '', domain: this.domainOf(row.link || '') }));
   }
 
   private domainOf(url: string): string {
@@ -157,7 +153,8 @@ export class WebDiscoveryScraper extends BaseScraper {
       'Mozambique','Zambia','Zimbabwe','Malawi','Ghana','Nigeria','Senegal','South Africa','Egypt','Cameroon','Guinea',
       'Liberia','Sierra Leone','Djibouti','Eritrea','Madagascar','Botswana','Namibia','Lesotho','Eswatini','Morocco','Tunisia',
     ];
-    const found = countries.find((country) => new RegExp(`\\b${country.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+    const lower = text.toLowerCase();
+    const found = countries.find((country) => lower.includes(country.toLowerCase()));
     if (found) return found;
     if (/east africa/i.test(text)) return 'East Africa';
     if (/africa-wide|across africa|african countries|pan-african/i.test(text)) return 'Africa';
@@ -175,10 +172,7 @@ export class WebDiscoveryScraper extends BaseScraper {
     for (const [index, pattern] of patterns.entries()) {
       const match = text.match(pattern);
       if (!match) continue;
-      let candidate = '';
-      if (index === 0) candidate = `${match[1]} ${match[2]} ${match[3]}`;
-      else if (index === 1) candidate = `${match[2]} ${match[1]} ${match[3]}`;
-      else candidate = `${match[1]}-${match[2]}-${match[3]}`;
+      const candidate = index === 0 ? `${match[1]} ${match[2]} ${match[3]}` : index === 1 ? `${match[2]} ${match[1]} ${match[3]}` : `${match[1]}-${match[2]}-${match[3]}`;
       const date = new Date(candidate);
       if (!Number.isNaN(date.getTime())) return date;
     }
