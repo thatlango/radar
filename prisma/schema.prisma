@@ -18,8 +18,8 @@ model User {
   isPro                Boolean   @default(false)
   resumeUrl            String?
   resumeText           String?   @db.Text
-  parsedSkills         String[]
-  parsedIndustries     String[]
+  parsedSkills         String[]  @default([])
+  parsedIndustries     String[]  @default([])
   phone                String?
   prefersSMS           Boolean   @default(false)
   referralCode         String    @unique @default(uuid())
@@ -54,9 +54,7 @@ model RadarSession {
   createdAt          DateTime @default(now())
   lastSeenAt         DateTime @default(now())
   expiresAt          DateTime
-
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
   @@index([expiresAt])
 }
@@ -76,10 +74,10 @@ model Opportunity {
   source          String
   sourceUrl       String    @unique
   aiSummary       String?   @db.Text
-  aiKeywords      String[]
+  aiKeywords      String[]  @default([])
   qualityScore    Float     @default(0)
   viewCount       Int       @default(0)
-  applyCount      Int       @default(0)
+  applyCount       Int       @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -109,10 +107,8 @@ model Match {
   finalRank          Float
   notified           Boolean   @default(false)
   createdAt          DateTime  @default(now())
-
   user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity        Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-
   @@unique([userId, opportunityId])
   @@index([userId, finalRank])
   @@index([notified])
@@ -125,10 +121,8 @@ model Interaction {
   type            String
   metadata        Json?
   createdAt       DateTime  @default(now())
-
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-
   @@index([userId, type])
   @@index([opportunityId, type])
   @@index([createdAt])
@@ -145,9 +139,7 @@ model Alert {
   lastSent            DateTime?
   sendCount           Int       @default(0)
   createdAt           DateTime  @default(now())
-
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([active, frequency])
   @@index([userId])
 }
@@ -162,10 +154,8 @@ model Application {
   aiGenerated     Boolean   @default(false)
   appliedAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-
   @@unique([userId, opportunityId])
   @@index([userId, status])
 }
@@ -175,10 +165,8 @@ model SavedOpportunity {
   userId          String
   opportunityId   String
   savedAt         DateTime  @default(now())
-
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-
   @@unique([userId, opportunityId])
   @@index([userId])
 }
@@ -192,10 +180,8 @@ model Referral {
   rewardGranted   Boolean   @default(false)
   createdAt       DateTime  @default(now())
   convertedAt     DateTime?
-
   referrer        User      @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
   referred        User?     @relation("Referred", fields: [referredId], references: [id], onDelete: SetNull)
-
   @@index([referrerId, status])
   @@index([referredEmail])
 }
@@ -211,9 +197,7 @@ model Payment {
   paymentDate         DateTime?
   type                String
   metadata            Json?
-
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
   @@index([status])
 }
@@ -232,7 +216,6 @@ model ScraperSource {
   totalScraped    Int       @default(0)
   config          Json?
   createdAt       DateTime  @default(now())
-
   @@index([active])
   @@index([type])
 }
@@ -248,9 +231,7 @@ model ApiKey {
   lastUsed        DateTime?
   usageCount      Int       @default(0)
   expiresAt       DateTime?
-
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([key])
   @@index([userId])
 }
@@ -269,7 +250,6 @@ model Experiment {
   impressionA      Int       @default(0)
   impressionB      Int       @default(0)
   createdAt        DateTime  @default(now())
-
   @@index([active])
 }
 
@@ -280,7 +260,6 @@ model ExperimentAssignment {
   variant         String
   converted       Boolean   @default(false)
   assignedAt      DateTime  @default(now())
-
   @@unique([experimentId, userId])
   @@index([experimentId, variant])
 }
@@ -291,7 +270,6 @@ model DailyMetric {
   metric          String
   value           Float
   metadata        Json?
-
   @@unique([date, metric])
   @@index([date])
   @@index([metric])
@@ -304,7 +282,6 @@ model SystemLog {
   message         String    @db.Text
   metadata        Json?
   createdAt       DateTime  @default(now())
-
   @@index([level, createdAt])
   @@index([source])
 }
