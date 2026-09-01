@@ -7,51 +7,59 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ==========================================
-// USER MANAGEMENT
-// ==========================================
-
 model User {
-  id              String    @id @default(uuid())
-  name            String?
-  email           String    @unique
-  password        String?   // Nullable for OAuth users
-  googleId        String?   @unique
-  role            String    @default("user") // user | admin
-  isPro           Boolean   @default(false)
-  resumeUrl       String?
-  resumeText      String?   @db.Text
-  parsedSkills    String[]
-  parsedIndustries String[]
-  phone           String?
-  prefersSMS      Boolean   @default(false)
-  referralCode    String    @unique @default(uuid())
-  emailVerified   Boolean   @default(false)
-  onboardingComplete Boolean @default(false)
-  preferences     Json?     // Store user preferences
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  lastLoginAt     DateTime?
-  
-  // Relations
-  alerts          Alert[]
-  matches         Match[]
-  payments        Payment[]
-  applications    Application[]
-  referralsGiven  Referral[]  @relation("Referrer")
-  referralsReceived Referral[] @relation("Referred")
-  interactions    Interaction[]
-  apiKeys         ApiKey[]
-  savedOpportunities SavedOpportunity[]
-  
+  id                   String    @id @default(uuid())
+  coreUserId           String?   @unique
+  name                 String?
+  email                String    @unique
+  password             String?
+  googleId             String?   @unique
+  role                 String    @default("user")
+  isPro                Boolean   @default(false)
+  resumeUrl            String?
+  resumeText           String?   @db.Text
+  parsedSkills         String[]
+  parsedIndustries     String[]
+  phone                String?
+  prefersSMS           Boolean   @default(false)
+  referralCode         String    @unique @default(uuid())
+  emailVerified        Boolean   @default(false)
+  onboardingComplete   Boolean   @default(false)
+  preferences          Json?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  lastLoginAt          DateTime?
+
+  alerts               Alert[]
+  matches              Match[]
+  payments             Payment[]
+  applications         Application[]
+  referralsGiven       Referral[]  @relation("Referrer")
+  referralsReceived    Referral[]  @relation("Referred")
+  interactions         Interaction[]
+  apiKeys              ApiKey[]
+  savedOpportunities   SavedOpportunity[]
+  radarSessions        RadarSession[]
+
   @@index([email])
   @@index([referralCode])
   @@index([isPro])
 }
 
-// ==========================================
-// OPPORTUNITIES
-// ==========================================
+model RadarSession {
+  id                 String   @id
+  userId             String
+  coreOrganizationId String?
+  coreBusinessId     String?
+  createdAt          DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  expiresAt          DateTime
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
 
 model Opportunity {
   id              String    @id @default(uuid())
@@ -59,7 +67,7 @@ model Opportunity {
   organization    String
   country         String
   region          String?
-  type            String    // job | fellowship | consultancy | grant | tender
+  type            String
   remote          Boolean   @default(false)
   description     String    @db.Text
   requirements    String?   @db.Text
@@ -74,13 +82,12 @@ model Opportunity {
   applyCount      Int       @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  
-  // Relations
+
   matches         Match[]
   applications    Application[]
   interactions    Interaction[]
   savedBy         SavedOpportunity[]
-  
+
   @@index([country])
   @@index([type])
   @@index([remote])
@@ -89,39 +96,23 @@ model Opportunity {
   @@index([qualityScore])
 }
 
-// ==========================================
-// AI MATCHING & RANKING
-// ==========================================
-
 model Match {
-  id              String    @id @default(uuid())
-  userId          String
-  opportunityId   String
-  
-  // AI Matching Scores
-  gptMatchScore   Float     // 0-100 from GPT-4
-  explanation     String    @db.Text
-  
-  // Location Matching
-  locationScore   Float     @default(0)
-  
-  // Behavioral Learning
-  behaviorScore   Float     @default(0)
-  userTypePreference Float  @default(0)
-  
-  // Freshness
-  freshnessScore  Float     @default(0)
-  
-  // Final Ranking
-  finalRank       Float     // Weighted combination
-  
-  // Metadata
-  notified        Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-  
+  id                 String    @id @default(uuid())
+  userId             String
+  opportunityId      String
+  gptMatchScore      Float
+  explanation        String    @db.Text
+  locationScore      Float     @default(0)
+  behaviorScore      Float     @default(0)
+  userTypePreference Float     @default(0)
+  freshnessScore     Float     @default(0)
+  finalRank          Float
+  notified           Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity        Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
   @@unique([userId, opportunityId])
   @@index([userId, finalRank])
   @@index([notified])
@@ -131,58 +122,50 @@ model Interaction {
   id              String    @id @default(uuid())
   userId          String
   opportunityId   String
-  type            String    // viewed | applied | saved | unsaved | dismissed
-  metadata        Json?     // Additional context
+  type            String
+  metadata        Json?
   createdAt       DateTime  @default(now())
-  
+
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-  
+
   @@index([userId, type])
   @@index([opportunityId, type])
   @@index([createdAt])
 }
-
-// ==========================================
-// ALERTS & NOTIFICATIONS
-// ==========================================
 
 model Alert {
   id                  String    @id @default(uuid())
   userId              String
   keywords            String
   locationPreference  String?
-  typePreference      String?   // job | fellowship | etc
-  frequency           String    // daily | weekly | instant
+  typePreference      String?
+  frequency           String
   active              Boolean   @default(true)
   lastSent            DateTime?
   sendCount           Int       @default(0)
   createdAt           DateTime  @default(now())
-  
+
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([active, frequency])
   @@index([userId])
 }
-
-// ==========================================
-// APPLICATIONS & TRACKING
-// ==========================================
 
 model Application {
   id              String    @id @default(uuid())
   userId          String
   opportunityId   String
-  status          String    @default("applied") // applied | interview | offer | rejected | withdrawn
+  status          String    @default("applied")
   notes           String?   @db.Text
   coverLetter     String?   @db.Text
   aiGenerated     Boolean   @default(false)
   appliedAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  
+
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-  
+
   @@unique([userId, opportunityId])
   @@index([userId, status])
 }
@@ -192,83 +175,67 @@ model SavedOpportunity {
   userId          String
   opportunityId   String
   savedAt         DateTime  @default(now())
-  
+
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-  
+
   @@unique([userId, opportunityId])
   @@index([userId])
 }
-
-// ==========================================
-// REFERRAL SYSTEM
-// ==========================================
 
 model Referral {
   id              String    @id @default(uuid())
   referrerId      String
   referredEmail   String
   referredId      String?
-  status          String    @default("pending") // pending | converted | expired
+  status          String    @default("pending")
   rewardGranted   Boolean   @default(false)
   createdAt       DateTime  @default(now())
   convertedAt     DateTime?
-  
+
   referrer        User      @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
   referred        User?     @relation("Referred", fields: [referredId], references: [id], onDelete: SetNull)
-  
+
   @@index([referrerId, status])
   @@index([referredEmail])
 }
 
-// ==========================================
-// PAYMENTS & MONETIZATION
-// ==========================================
-
 model Payment {
-  id              String    @id @default(uuid())
-  userId          String
-  amount          Float
-  currency        String    @default("USD")
-  status          String    // pending | completed | failed | refunded
-  stripeSessionId String?   @unique
-  stripePaymentIntent String? @unique
-  paymentDate     DateTime?
-  type            String    // pro | api_access | enterprise
-  metadata        Json?
-  
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id                  String    @id @default(uuid())
+  userId              String
+  amount              Float
+  currency            String    @default("USD")
+  status              String
+  stripeSessionId     String?   @unique
+  stripePaymentIntent String?   @unique
+  paymentDate         DateTime?
+  type                String
+  metadata            Json?
+
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([status])
 }
-
-// ==========================================
-// SCRAPER MANAGEMENT
-// ==========================================
 
 model ScraperSource {
   id              String    @id @default(uuid())
   name            String
   baseUrl         String
   active          Boolean   @default(true)
-  type            String    // job | fellowship | grant | tender
-  frequency       String    @default("hourly") // hourly | daily | weekly
+  type            String
+  frequency       String    @default("hourly")
   lastRun         DateTime?
   lastSuccess     DateTime?
   errorCount      Int       @default(0)
   successCount    Int       @default(0)
   totalScraped    Int       @default(0)
-  config          Json?     // Scraper-specific config
+  config          Json?
   createdAt       DateTime  @default(now())
-  
+
   @@index([active])
   @@index([type])
 }
-
-// ==========================================
-// API ACCESS
-// ==========================================
 
 model ApiKey {
   id              String    @id @default(uuid())
@@ -276,37 +243,33 @@ model ApiKey {
   key             String    @unique
   name            String?
   active          Boolean   @default(true)
-  rateLimit       Int       @default(1000) // Requests per hour
+  rateLimit       Int       @default(1000)
   createdAt       DateTime  @default(now())
   lastUsed        DateTime?
   usageCount      Int       @default(0)
   expiresAt       DateTime?
-  
+
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([key])
   @@index([userId])
 }
 
-// ==========================================
-// EXPERIMENTS & A/B TESTING
-// ==========================================
-
 model Experiment {
-  id              String    @id @default(uuid())
-  name            String
-  description     String?
-  variantA        Json      // Configuration for variant A
-  variantB        Json      // Configuration for variant B
-  active          Boolean   @default(true)
-  startDate       DateTime  @default(now())
-  endDate         DateTime?
-  conversionEventA Int      @default(0)
-  conversionEventB Int      @default(0)
-  impressionA     Int       @default(0)
-  impressionB     Int       @default(0)
-  createdAt       DateTime  @default(now())
-  
+  id               String    @id @default(uuid())
+  name             String
+  description      String?
+  variantA         Json
+  variantB         Json
+  active           Boolean   @default(true)
+  startDate        DateTime  @default(now())
+  endDate          DateTime?
+  conversionEventA Int       @default(0)
+  conversionEventB Int       @default(0)
+  impressionA      Int       @default(0)
+  impressionB      Int       @default(0)
+  createdAt        DateTime  @default(now())
+
   @@index([active])
 }
 
@@ -314,17 +277,13 @@ model ExperimentAssignment {
   id              String    @id @default(uuid())
   experimentId    String
   userId          String
-  variant         String    // A | B
+  variant         String
   converted       Boolean   @default(false)
   assignedAt      DateTime  @default(now())
-  
+
   @@unique([experimentId, userId])
   @@index([experimentId, variant])
 }
-
-// ==========================================
-// ANALYTICS & METRICS
-// ==========================================
 
 model DailyMetric {
   id              String    @id @default(uuid())
@@ -332,7 +291,7 @@ model DailyMetric {
   metric          String
   value           Float
   metadata        Json?
-  
+
   @@unique([date, metric])
   @@index([date])
   @@index([metric])
@@ -340,12 +299,12 @@ model DailyMetric {
 
 model SystemLog {
   id              String    @id @default(uuid())
-  level           String    // info | warn | error | critical
-  source          String    // scraper | api | cron | auth
+  level           String
+  source          String
   message         String    @db.Text
   metadata        Json?
   createdAt       DateTime  @default(now())
-  
+
   @@index([level, createdAt])
   @@index([source])
 }
