@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: radar-db
+    restart: unless-stopped
+    env_file: /opt/tuku/secrets/radar.env
+    environment:
+      POSTGRES_USER: ${RADAR_DB_USER:-radar}
+      POSTGRES_PASSWORD: ${RADAR_DB_PASSWORD}
+      POSTGRES_DB: ${RADAR_DB_NAME:-radar}
+    volumes:
+      - radar-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RADAR_DB_USER:-radar} -d ${RADAR_DB_NAME:-radar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [radar-internal]
+
+  api:
+    build: .
+    image: tuku/radar:ovh
+    container_name: radar-api
+    restart: unless-stopped
+    env_file: /opt/tuku/secrets/radar.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      radar-internal: {}
+      tuku-edge: {}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  scheduler:
+    image: tuku/radar:ovh
+    container_name: radar-scheduler
+    restart: unless-stopped
+    command: ["./node_modules/.bin/tsx", "alerts/scheduler.ts"]
+    env_file: /opt/tuku/secrets/radar.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [radar-internal]
+
+volumes:
+  radar-db-data:
+
+networks:
+  radar-internal:
+    internal: true
+  tuku-edge:
+    external: true
