@@ -81,6 +81,22 @@ model Opportunity {
   deadline        DateTime?
   source          String
   sourceUrl       String    @unique
+  canonicalKey    String    @unique @default(uuid())
+  referenceNumber String?
+  sector          String?
+  currency        String?
+  valueMin        Float?
+  valueMax        Float?
+  contractDuration String?
+  submissionMethod String?
+  languages       String[]  @default([])
+  eligibilityCountries String[] @default([])
+  publishedAt     DateTime?
+  discoveredAt    DateTime  @default(now())
+  lastVerifiedAt  DateTime  @default(now())
+  closedAt        DateTime?
+  sourceStatus    String    @default("live")
+  verificationStatus String @default("verified")
   aiSummary       String?   @db.Text
   aiKeywords      String[]  @default([])
   qualityScore    Float     @default(0)
@@ -94,6 +110,7 @@ model Opportunity {
   interactions    Interaction[]
   savedBy         SavedOpportunity[]
   workspaces      OpportunityWorkspace[]
+  sources         OpportunitySource[]
 
   @@index([country])
   @@index([type])
@@ -101,6 +118,27 @@ model Opportunity {
   @@index([createdAt])
   @@index([deadline])
   @@index([qualityScore])
+  @@index([sourceStatus, lastVerifiedAt])
+  @@index([verificationStatus])
+  @@index([sector])
+  @@index([publishedAt])
+}
+
+model OpportunitySource {
+  id              String    @id @default(uuid())
+  opportunityId   String
+  sourceName      String
+  sourceUrl       String    @unique
+  sourceType      String?
+  discoveredAt    DateTime  @default(now())
+  lastVerifiedAt  DateTime  @default(now())
+  status          String    @default("live")
+  rawMetadata     Json?
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([opportunityId])
+  @@index([sourceName, status])
+  @@index([lastVerifiedAt])
 }
 
 model Match {
@@ -109,6 +147,11 @@ model Match {
   opportunityId      String
   gptMatchScore      Float
   explanation        String    @db.Text
+  keySkillMatches    String[]  @default([])
+  missingRequirements String[] @default([])
+  hardConstraints    String[]  @default([])
+  specialistNeeds    String[]  @default([])
+  confidence         Float     @default(0.5)
   locationScore      Float     @default(0)
   behaviorScore      Float     @default(0)
   userTypePreference Float     @default(0)
