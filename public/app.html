@@ -7,6 +7,7 @@
   <title>Radar AI — Opportunity Operating System</title>
   <meta name="description" content="Discover, assess, prepare, collaborate on and track high-value opportunities with Radar AI." />
   <link rel="stylesheet" href="/app.css" />
+<link rel="stylesheet" href="/tuku-auth.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -99,7 +100,7 @@
         </section>
 
         <section id="profileView" class="view">
-          <div class="page-title-row"><div><span class="eyebrow">Matching context</span><h1>Profile & preferences.</h1><p>Give Radar enough context to rank opportunities and draft accurately. Your local AI only receives the relevant context needed for each task.</p></div><div id="planChip" class="plan-chip">Free</div></div>
+          <div class="page-title-row"><div><span class="eyebrow">Matching context</span><h1>Profile & preferences.</h1><p>Give Radar enough context to rank opportunities and draft accurately. Your local AI only receives the relevant context needed for each task.</p></div><button id="planChip" class="plan-chip" type="button">Starter</button></div>
           <div class="profile-grid">
             <form id="profileForm" class="settings-card">
               <h2>Opportunity profile</h2>
@@ -131,6 +132,18 @@
             </form>
           </div>
         </section>
+
+        <section id="subscriptionView" class="view">
+          <div class="subscription-hero">
+            <span class="eyebrow">Radar plans</span>
+            <h1>Choose the capacity you need.</h1>
+            <p>Start free, move to Professional when application volume and collaboration grow, or use an Enterprise arrangement for organisation-wide deployment.</p>
+            <div class="billing-switch" role="group" aria-label="Billing period"><button id="billingMonthly" class="active" type="button">Monthly</button><button id="billingAnnual" type="button">Annually <span>Save 20%</span></button></div>
+          </div>
+          <div id="subscriptionState" class="subscription-state"></div>
+          <div id="planGrid" class="plan-grid"></div>
+          <div class="subscription-note"><strong>Billing architecture</strong><p>Tuku Auth owns identity and Tuku Core is the subscription/entitlement authority. Checkout never grants access by itself; a confirmed provider settlement must grant the entitlement before Radar unlocks paid capacity.</p></div>
+        </section>
       </main>
     </div>
   </div>
@@ -139,5 +152,6 @@
   <div id="aiDrawer" class="drawer ai-drawer" aria-hidden="true"><div class="drawer-head"><div><span class="eyebrow">Private local intelligence</span><h2>Ask Radar AI</h2></div><button class="icon-button" data-close-drawer="aiDrawer">×</button></div><div id="aiContextLabel" class="context-label">General Radar context</div><div id="aiChatHistory" class="chat-history"><div class="chat-message assistant">Ask about the selected opportunity, an application workspace, your evidence gaps, or the best next action.</div></div><form id="aiChatForm" class="chat-form"><textarea id="aiChatInput" rows="3" placeholder="What should I do next?" required></textarea><button class="button primary" type="submit">Ask Radar</button></form></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/app.js"></script>
+<script src="/tuku-auth.js"></script>
 </body>
 </html>
