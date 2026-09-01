@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#f6f7f4" />
   <title>Radar — Opportunity Workspace</title>
-  <meta name="description" content="Discover, assess, save and track opportunities with Radar by Tuku-Tuku." />
+  <meta name="description" content="Tell Radar what you are looking for, add your skills or CV, and get a personal opportunity brief every morning." />
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
@@ -14,6 +14,7 @@
       <a class="brand" href="/app"><span class="brand-mark">R</span><span><strong>Radar</strong><small>by Tuku-Tuku</small></span></a>
       <nav class="nav" aria-label="Radar workspace">
         <button class="nav-item active" data-view="discover"><span>⌕</span>Discover</button>
+        <button class="nav-item" data-view="briefing"><span>☀</span>Daily brief</button>
         <button class="nav-item" data-view="saved"><span>♡</span>Saved</button>
         <button class="nav-item" data-view="applications"><span>✓</span>Applications</button>
         <button class="nav-item" data-view="profile"><span>◉</span>Your profile</button>
@@ -24,7 +25,7 @@
     <div class="workspace">
       <header class="topbar">
         <div class="mobile-brand"><span class="brand-mark">R</span><strong>Radar</strong></div>
-        <div class="global-search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search roles, grants, fellowships, organisations…" autocomplete="off" /></div>
+        <div class="global-search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search roles, consulting, grants, tenders, organisations…" autocomplete="off" /></div>
         <div class="top-actions">
           <span id="sessionLabel" class="session-label">Browsing public opportunities</span>
           <button id="authButton" class="button secondary">Sign in with Tuku</button>
@@ -33,20 +34,58 @@
 
       <main class="main">
         <section id="discoverView" class="view active">
-          <div class="page-head"><div><span class="eyebrow">Opportunity intelligence</span><h1>Find work worth pursuing.</h1><p>Search the live feed, then use fit intelligence to decide where to spend your application time.</p></div><div class="pulse"><span class="live-dot"></span>Live feed</div></div>
+          <div class="page-head"><div><span class="eyebrow">Opportunity intelligence</span><h1>Find work worth pursuing.</h1><p>Radar scans broad sources, ranks new opportunities against your profile, and helps you decide what deserves application time.</p></div><div class="pulse"><span class="live-dot"></span>Live feed</div></div>
           <div id="statsGrid" class="stats-grid" aria-live="polite"></div>
           <div class="filters" role="search">
-            <select id="typeFilter" aria-label="Opportunity type"><option value="">All opportunity types</option><option value="job">Jobs</option><option value="consulting">Consulting</option><option value="fellowship">Fellowships</option><option value="grant">Grants</option><option value="internship">Internships</option></select>
-            <input id="countryFilter" placeholder="Country" aria-label="Country" />
+            <select id="typeFilter" aria-label="Opportunity type"><option value="">All opportunity types</option><option value="job">Jobs</option><option value="consultancy">Consulting</option><option value="tender">Tenders / RFPs</option><option value="fellowship">Fellowships</option><option value="grant">Grants</option><option value="internship">Internships</option></select>
+            <input id="countryFilter" placeholder="Country or region" aria-label="Country" />
             <label class="check"><input id="remoteFilter" type="checkbox" />Remote only</label>
             <button id="clearFilters" class="text-button">Clear</button>
           </div>
           <div class="content-grid"><section><div class="section-head"><div><h2>Best available opportunities</h2><p id="resultMeta">Loading the current feed…</p></div><button id="refreshButton" class="button secondary">Refresh</button></div><div id="opportunityList" class="opportunity-list"></div></section><aside id="detailPanel" class="detail-panel"><div class="empty-detail"><div class="empty-icon">↗</div><strong>Select an opportunity</strong><p>Open a listing to review the source, deadline, fit and next actions.</p></div></aside></div>
         </section>
 
+        <section id="briefingView" class="view">
+          <div class="page-head compact"><div><span class="eyebrow">Personal opportunity scan</span><h1>Your morning Radar.</h1><p>Choose when and where your brief arrives. Radar only sends when it finds new opportunities that clear your fit and deadline thresholds.</p></div></div>
+          <form id="briefingForm" class="profile-card">
+            <label class="check profile-check"><input id="briefEnabled" type="checkbox" checked />Send me a daily opportunity brief</label>
+            <div class="field"><label>Delivery time</label><select id="briefHour"><option value="8">8:00 AM</option><option value="9">9:00 AM</option></select></div>
+            <div class="field"><label>Timezone</label><input id="briefTimezone" value="Africa/Kampala" placeholder="Africa/Kampala" /></div>
+            <div class="field"><label>Minimum fit score</label><select id="briefMinFit"><option value="50">50% — broad</option><option value="60" selected>60% — useful</option><option value="70">70% — strong matches</option><option value="80">80% — very selective</option></select></div>
+            <div class="field"><label>Minimum application runway</label><select id="briefMinDays"><option value="3">At least 3 days</option><option value="5">At least 5 days</option><option value="7" selected>At least 7 days</option><option value="14">At least 14 days</option></select></div>
+            <div class="field"><label>Delivery channels</label><div style="display:grid;gap:10px"><label class="check"><input id="briefEmail" type="checkbox" checked />Email</label><label class="check"><input id="briefWhatsapp" type="checkbox" />WhatsApp</label></div></div>
+            <div class="field"><label>WhatsApp number <small>include country code</small></label><input id="briefPhone" placeholder="+256…" /></div>
+            <div id="briefingMessage" class="form-message"></div>
+            <div class="detail-actions"><button class="button primary" type="submit">Save daily brief</button><button id="previewBrief" class="button secondary" type="button">Preview matches</button></div>
+          </form>
+          <div class="section-head" style="margin-top:28px"><div><h2>What Radar would send now</h2><p>New items that currently pass your saved thresholds.</p></div></div>
+          <div id="briefPreviewList" class="opportunity-list wide"></div>
+        </section>
+
         <section id="savedView" class="view"><div class="page-head compact"><div><span class="eyebrow">Shortlist</span><h1>Saved opportunities.</h1><p>Keep your strongest options together before you commit application time.</p></div></div><div id="savedList" class="opportunity-list wide"></div></section>
         <section id="applicationsView" class="view"><div class="page-head compact"><div><span class="eyebrow">Pipeline</span><h1>Applications.</h1><p>Track each opportunity from planning through outcome.</p></div></div><div id="applicationList" class="application-list"></div></section>
-        <section id="profileView" class="view"><div class="page-head compact"><div><span class="eyebrow">Matching context</span><h1>Your Radar profile.</h1><p>Better context produces better rankings. Use concise, factual preferences.</p></div></div><form id="profileForm" class="profile-card"><div class="field"><label>Name</label><input id="profileName" /></div><div class="field"><label>Skills <small>comma separated</small></label><textarea id="profileSkills" rows="3" placeholder="Program design, MSME advisory, research…"></textarea></div><div class="field"><label>Industries <small>comma separated</small></label><textarea id="profileIndustries" rows="3" placeholder="Development, technology, agriculture…"></textarea></div><div class="field"><label>Preferred countries <small>comma separated</small></label><input id="profileCountries" placeholder="Uganda, Kenya, Remote" /></div><label class="check profile-check"><input id="profileRemote" type="checkbox" />Prioritise remote opportunities</label><div id="profileMessage" class="form-message"></div><button class="button primary" type="submit">Save matching profile</button></form></section>
+
+        <section id="profileView" class="view">
+          <div class="page-head compact"><div><span class="eyebrow">Matching context</span><h1>Tell Radar what good looks like.</h1><p>Write what you are looking for in normal language, add your skills or upload a CV. Radar uses this context to rank the shared opportunity feed for you.</p></div></div>
+          <form id="profileForm" class="profile-card">
+            <div class="field"><label>Name</label><input id="profileName" /></div>
+            <div class="field"><label>What are you looking for?</label><textarea id="profileLookingFor" rows="5" placeholder="Example: I want programme design, enterprise development and innovation consulting work in Uganda, East Africa or remote. I can lead methodology and hire sector specialists where needed."></textarea></div>
+            <div class="field"><label>I'm searching as</label><select id="profileType"><option value="individual">An individual</option><option value="firm">A firm / organisation</option><option value="both">Both</option></select></div>
+            <label class="check profile-check"><input id="profileRecruitSpecialists" type="checkbox" />I can recruit or contract specialists to close domain gaps</label>
+            <div class="field"><label>Scan focus</label><select id="profileScanPreset"><option value="consulting-firm">Consulting & implementation opportunities</option><option value="strong-fit-role">Strong-fit roles & individual consultancies</option><option value="innovation-entrepreneurship">Innovation & entrepreneurship</option></select></div>
+            <div class="field"><label>Skills <small>comma separated</small></label><textarea id="profileSkills" rows="3" placeholder="Programme design, MSME advisory, research, facilitation, MEL…"></textarea></div>
+            <div class="field"><label>Industries / domains <small>comma separated</small></label><textarea id="profileIndustries" rows="3" placeholder="Development, private sector, technology, agriculture…"></textarea></div>
+            <div class="field"><label>Opportunity types <small>comma separated</small></label><input id="profileTypes" placeholder="consultancy, tender, grant, job" /></div>
+            <div class="field"><label>Preferred countries <small>comma separated</small></label><input id="profileCountries" placeholder="Uganda, Kenya, Rwanda" /></div>
+            <div class="field"><label>Preferred regions <small>comma separated</small></label><input id="profileRegions" placeholder="East Africa, Africa, Global" /></div>
+            <label class="check profile-check"><input id="profileRemote" type="checkbox" />Prioritise remote opportunities too</label>
+            <div class="field"><label>Phone / WhatsApp</label><input id="profilePhone" placeholder="+256…" /></div>
+            <div class="field"><label>CV or profile <small>PDF or TXT, up to 5 MB</small></label><input id="resumeFile" type="file" accept="application/pdf,text/plain,.pdf,.txt" /><small id="resumeStatus">No CV uploaded yet.</small></div>
+            <div class="detail-actions"><button id="uploadResume" type="button" class="button secondary">Upload CV</button><button id="removeResume" type="button" class="text-button">Remove CV</button></div>
+            <div id="profileMessage" class="form-message"></div>
+            <button class="button primary" type="submit">Save matching profile</button>
+          </form>
+        </section>
       </main>
     </div>
   </div>
