@@ -40,6 +40,12 @@ model User {
   apiKeys              ApiKey[]
   savedOpportunities   SavedOpportunity[]
   radarSessions        RadarSession[]
+  workspaces           OpportunityWorkspace[]
+  workspaceMemberships WorkspaceMember[]
+  workspaceComments    WorkspaceComment[]
+  userDocuments        UserDocument[]
+  notifications        Notification[]
+  subscriptionUsage    SubscriptionUsage[]
 
   @@index([email])
   @@index([referralCode])
@@ -51,6 +57,8 @@ model RadarSession {
   userId             String
   coreOrganizationId String?
   coreBusinessId     String?
+  coreAccess         Json?
+  corePermissionCodes String[] @default([])
   createdAt          DateTime @default(now())
   lastSeenAt         DateTime @default(now())
   expiresAt          DateTime
@@ -85,6 +93,7 @@ model Opportunity {
   applications    Application[]
   interactions    Interaction[]
   savedBy         SavedOpportunity[]
+  workspaces      OpportunityWorkspace[]
 
   @@index([country])
   @@index([type])
@@ -169,6 +178,132 @@ model SavedOpportunity {
   opportunity     Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   @@unique([userId, opportunityId])
   @@index([userId])
+}
+
+model OpportunityWorkspace {
+  id                   String    @id @default(uuid())
+  userId               String
+  opportunityId        String
+  name                 String
+  status               String    @default("drafting")
+  progress             Int       @default(0)
+  submissionDeadline   DateTime?
+  aiPlan               String?   @db.Text
+  aiPlanStructured     Json?
+  lastAiInteractionId  String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity          Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  documents            WorkspaceDocument[]
+  members              WorkspaceMember[]
+  comments             WorkspaceComment[]
+
+  @@unique([userId, opportunityId])
+  @@index([userId, status])
+  @@index([submissionDeadline])
+}
+
+model WorkspaceDocument {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  title           String
+  kind            String
+  status          String    @default("pending")
+  content         String?   @db.Text
+  generatedByAi   Boolean   @default(false)
+  version         Int       @default(1)
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  workspace       OpportunityWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  comments        WorkspaceComment[]
+
+  @@unique([workspaceId, title])
+  @@index([workspaceId, status])
+}
+
+model WorkspaceMember {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  userId          String?
+  name            String?
+  email           String
+  role            String    @default("reviewer")
+  status          String    @default("invited")
+  createdAt       DateTime  @default(now())
+  workspace       OpportunityWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, email])
+  @@index([userId])
+}
+
+model WorkspaceComment {
+  id              String    @id @default(uuid())
+  workspaceId     String
+  documentId      String?
+  authorUserId    String?
+  authorName      String?
+  body            String    @db.Text
+  status          String    @default("open")
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+  workspace       OpportunityWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  document        WorkspaceDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  author          User?     @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status])
+  @@index([documentId])
+}
+
+model UserDocument {
+  id              String    @id @default(uuid())
+  userId          String
+  title           String
+  category        String
+  fileName        String?
+  mimeType        String?
+  content         String?   @db.Text
+  sourceType      String    @default("manual")
+  metadata        Json?
+  expiresAt       DateTime?
+  lastReviewedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, category])
+  @@index([expiresAt])
+}
+
+model Notification {
+  id              String    @id @default(uuid())
+  userId          String
+  type            String
+  title           String
+  body            String    @db.Text
+  metadata        Json?
+  readAt          DateTime?
+  createdAt       DateTime  @default(now())
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+model SubscriptionUsage {
+  id              String    @id @default(uuid())
+  userId          String
+  metric          String
+  periodKey       String
+  count           Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, metric, periodKey])
+  @@index([userId, periodKey])
 }
 
 model Referral {

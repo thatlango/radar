@@ -1,164 +1,199 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { session: null, config: null, opportunities: [], selected: null, view: 'discover', timer: null };
+  const state = {
+    session: null, config: null, opportunities: [], selected: null, view: 'discover', timer: null,
+    workspaces: [], workspace: null, activeDocumentId: null, notifications: [], applications: [], subscription: null, subscriptionPlans: null, billingAnnual: false,
+  };
   const pendingKey = 'radar:tuku-sso:pending';
-  const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const safeUrl = (value) => { try { const u = new URL(String(value)); return ['http:', 'https:'].includes(u.protocol) ? u.toString() : ''; } catch { return ''; } };
   const api = async (path, options = {}) => {
-    const response = await fetch(path, { credentials: 'same-origin', ...options, headers: { Accept: 'application/json', ...(options.body ? {'content-type':'application/json'} : {}), ...(options.headers || {}) } });
+    const response = await fetch(path, { credentials: 'same-origin', ...options, headers: { Accept:'application/json', ...(options.body ? {'content-type':'application/json'} : {}), ...(options.headers || {}) } });
     const body = response.status === 204 ? null : await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body?.error?.message || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(body?.error?.message || `Request failed (${response.status})`);
+      error.code = body?.error?.code; error.details = body?.error?.details; throw error;
+    }
     return body?.data ?? body;
   };
-  const toast = (message) => { const el = $('toast'); el.textContent = message; el.classList.add('show'); clearTimeout(state.timer); state.timer = setTimeout(() => el.classList.remove('show'), 2800); };
-  const list = (value) => String(value || '').split(',').map((v) => v.trim()).filter(Boolean);
+  const toast = (message) => { const el=$('toast'); el.textContent=message; el.classList.add('show'); clearTimeout(state.timer); state.timer=setTimeout(()=>el.classList.remove('show'),3000); };
+  const list = (value) => String(value || '').split(',').map((v)=>v.trim()).filter(Boolean);
   const fmtDate = (value) => value ? new Intl.DateTimeFormat(undefined,{dateStyle:'medium'}).format(new Date(value)) : 'No deadline listed';
-  const days = (value) => value ? Math.ceil((new Date(value).getTime() - Date.now()) / 86400000) : null;
-  const deadline = (value) => { const d = days(value); if (d === null) return 'Open deadline'; if (d < 0) return 'Closed'; if (d === 0) return 'Closes today'; if (d === 1) return '1 day left'; return `${d} days left`; };
-  const base64url = (bytes) => { let s=''; bytes.forEach(b => s += String.fromCharCode(b)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,''); };
-  const token = (length) => { const b = new Uint8Array(length); crypto.getRandomValues(b); return base64url(b); };
-  const challenge = async (verifier) => base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+  const fmtDateTime = (value) => value ? new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)) : '';
+  const days = (value) => value ? Math.ceil((new Date(value).getTime()-Date.now())/86400000) : null;
+  const deadline = (value) => { const d=days(value); if(d===null)return'Open deadline'; if(d<0)return'Closed'; if(d===0)return'Closes today'; if(d===1)return'1 day left'; return `${d} days left`; };
+  const base64url = (bytes) => { let s=''; bytes.forEach((b)=>s+=String.fromCharCode(b)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,''); };
+  const token = (length) => { const b=new Uint8Array(length); crypto.getRandomValues(b); return base64url(b); };
+  const challenge = async (verifier) => base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
+  const statusLabel = (status) => String(status || 'pending').replace(/_/g,' ');
+  const fileToBase64 = async (file) => { const bytes=new Uint8Array(await file.arrayBuffer()); let binary=''; const chunk=0x8000; for(let i=0;i<bytes.length;i+=chunk) binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length))); return btoa(binary); };
 
   async function signIn() {
-    const config = state.config || await api('/api/config');
-    const verifier = token(64), ssoState = token(32), codeChallenge = await challenge(verifier);
-    sessionStorage.setItem(pendingKey, JSON.stringify({ verifier, state: ssoState, createdAt: Date.now() }));
-    const url = new URL('/authorize', config.coreUrl);
-    url.searchParams.set('client_id', config.clientId);
-    url.searchParams.set('redirect_uri', config.redirectUri);
-    url.searchParams.set('state', ssoState);
-    url.searchParams.set('code_challenge', codeChallenge);
-    url.searchParams.set('code_challenge_method', 'S256');
-    location.assign(url.toString());
+    const config=state.config || await api('/api/config');
+    const verifier=token(64), ssoState=token(32), codeChallenge=await challenge(verifier);
+    sessionStorage.setItem(pendingKey,JSON.stringify({verifier,state:ssoState,createdAt:Date.now()}));
+    const url=new URL('/authorize',config.coreUrl); url.searchParams.set('client_id',config.clientId); url.searchParams.set('redirect_uri',config.redirectUri); url.searchParams.set('state',ssoState); url.searchParams.set('code_challenge',codeChallenge); url.searchParams.set('code_challenge_method','S256'); location.assign(url.toString());
   }
-
   async function finishSignIn() {
-    const params = new URLSearchParams(location.search);
-    const code = params.get('code'), returnedState = params.get('state');
-    if (!code || !returnedState) return false;
-    const raw = sessionStorage.getItem(pendingKey);
-    if (!raw) throw new Error('This Tuku sign-in has expired. Start again.');
-    const pending = JSON.parse(raw);
-    if (pending.state !== returnedState || Date.now() - Number(pending.createdAt || 0) > 600000) throw new Error('Tuku sign-in could not be resumed safely.');
-    await api('/api/auth/tuku/exchange', { method:'POST', body: JSON.stringify({ code, codeVerifier: pending.verifier }) });
-    sessionStorage.removeItem(pendingKey);
-    history.replaceState({}, '', '/app');
-    return true;
+    const params=new URLSearchParams(location.search); const code=params.get('code'), returnedState=params.get('state'); if(!code||!returnedState)return false;
+    const raw=sessionStorage.getItem(pendingKey); if(!raw)throw new Error('This Tuku sign-in has expired. Start again.');
+    const pending=JSON.parse(raw); if(pending.state!==returnedState || Date.now()-Number(pending.createdAt||0)>600000)throw new Error('Tuku sign-in could not be resumed safely.');
+    await api('/api/auth/tuku/exchange',{method:'POST',body:JSON.stringify({code,codeVerifier:pending.verifier})}); sessionStorage.removeItem(pendingKey); history.replaceState({},'','/app'); return true;
   }
-
   async function loadSession() {
-    try { state.session = await api('/api/session'); } catch { state.session = null; }
-    $('authButton').textContent = state.session ? 'Sign out' : 'Sign in with Tuku';
-    $('sessionLabel').textContent = state.session ? (state.session.user?.name || state.session.user?.email || 'Tuku account') : 'Browsing public opportunities';
+    try{state.session=await api('/api/session')}catch{state.session=null}
+    $('authButton').textContent=state.session?'Sign out':'Sign in with Tuku';
+    $('sessionLabel').textContent=state.session?(state.session.user?.name||state.session.user?.email||'Tuku account'):'Browsing public opportunities';
+    if(state.session) void loadNotifications(); else { $('notificationCount').hidden=true; }
+  }
+  function requireAuth(){if(state.session)return true; toast('Sign in with Tuku to use this action.'); return false;}
+
+  async function loadStats(){
+    try{const s=await api('/api/stats'); const items=[['Live',s.live,'Open opportunities'],['Remote',s.remote,'Location-flexible'],['Closing soon',s.closingSoon,'Within 14 days'],['Sources',s.activeSources,'Active scan feeds']]; $('statsGrid').innerHTML=items.map(([l,v,n])=>`<article class="stat-card"><span>${escape(l)}</span><strong>${Number(v||0).toLocaleString()}</strong><small>${escape(n)}</small></article>`).join(''); $('sourceStatus').textContent=`${Number(s.activeSources||0)} active sources`;}catch{$('statsGrid').innerHTML=''}
+  }
+  function opportunityCard(row){
+    const selected=state.selected?.id===row.id?' selected':''; const score=row.fitScore==null?'<span class="score unknown">—</span>':`<span class="score">${Math.round(row.fitScore)}%</span>`;
+    return `<article class="opportunity-card${selected}" data-opportunity-id="${escape(row.id)}"><div class="card-top"><div><h3>${escape(row.title)}</h3><div class="org">${escape(row.organization||'Organisation not listed')}</div></div>${score}</div><div class="meta-row">${row.type?`<span class="tag">${escape(row.type)}</span>`:''}${row.country?`<span class="tag">${escape(row.country)}</span>`:''}${row.remote?'<span class="tag">Remote</span>':''}<span class="tag deadline">${escape(deadline(row.deadline))}</span>${row.workspace?`<span class="tag workspace">Workspace · ${escape(row.workspace.status)}</span>`:''}</div><p class="card-description">${escape(row.summary||row.description||'Open the opportunity for details.')}</p></article>`;
+  }
+  function bindOpportunityCards(container){container.querySelectorAll('[data-opportunity-id]').forEach((el)=>el.addEventListener('click',()=>selectOpportunity(el.dataset.opportunityId)));}
+  async function loadOpportunities(){
+    const target=$('opportunityList'); target.innerHTML='<div class="loading-card"></div><div class="loading-card"></div><div class="loading-card"></div>';
+    const p=new URLSearchParams(); const q=$('searchInput').value.trim(), type=$('typeFilter').value, country=$('countryFilter').value.trim(), minValue=$('valueFilter').value;
+    if(q)p.set('q',q); if(type)p.set('type',type); if(country)p.set('country',country); if(minValue)p.set('minValue',minValue); if($('remoteFilter').checked)p.set('remote','true'); p.set('limit','60');
+    try{const data=await api(`/api/opportunities?${p}`); state.opportunities=data.items||[]; $('resultMeta').textContent=`${state.opportunities.length} current result${state.opportunities.length===1?'':'s'}${state.session?' · ranked for you':''}`; target.innerHTML=state.opportunities.length?state.opportunities.map(opportunityCard).join(''):'<div class="empty-state">No current opportunities match these parameters.</div>'; bindOpportunityCards(target); if(state.selected){const fresh=state.opportunities.find((x)=>x.id===state.selected.id); if(fresh){state.selected=fresh; renderOpportunityDetail();}}}catch(e){target.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}
+  }
+  async function selectOpportunity(id){try{state.selected=await api(`/api/opportunities/${encodeURIComponent(id)}`); renderOpportunityDetail(); document.querySelectorAll('[data-opportunity-id]').forEach((el)=>el.classList.toggle('selected',el.dataset.opportunityId===id)); updateAiContext();}catch(e){toast(e.message)}}
+  function renderOpportunityDetail(){
+    const row=state.selected;if(!row)return; const source=safeUrl(row.sourceUrl); const panel=$('detailPanel');
+    panel.innerHTML=`<div class="detail"><div class="detail-head"><div><span class="eyebrow">${escape(row.type||'Opportunity')}</span><h2>${escape(row.title)}</h2><div class="org">${escape(row.organization||'Organisation not listed')} · ${escape(row.country||'Location not listed')}</div></div>${row.fitScore==null?'<span class="score unknown">—</span>':`<span class="score">${Math.round(row.fitScore)}%</span>`}</div><div class="meta-row">${row.remote?'<span class="tag">Remote</span>':''}<span class="tag deadline">${escape(deadline(row.deadline))}</span>${row.compensation?`<span class="tag">${escape(row.compensation)}</span>`:''}${row.source?`<span class="tag">${escape(row.source)}</span>`:''}</div>${source?`<a class="source-link" href="${escape(source)}" target="_blank" rel="noopener noreferrer">Open original source ↗</a>`:''}<div class="detail-actions"><button id="saveAction" class="button ghost">${row.saved?'Remove saved':'Save'}</button><button id="fitAction" class="button accent">✦ Why am I a fit?</button><button id="briefAction" class="button ghost">Prepare brief</button><button id="workspaceAction" class="button primary">${row.workspace?'Open workspace':'Start application in Radar'}</button></div><div id="opportunityAiSection" class="detail-section" hidden><h4>Radar AI guide</h4><div id="opportunityAiBox" class="ai-box"></div></div><div class="detail-section"><h4>Opportunity overview</h4><p>${escape(row.description||row.summary||'No description available.')}</p></div>${row.requirements?`<div class="detail-section"><h4>Technical requirements</h4><p>${escape(row.requirements)}</p></div>`:''}<div class="detail-section"><h4>Deadline</h4><p>${escape(fmtDate(row.deadline))} · ${escape(deadline(row.deadline))}</p></div><div class="detail-section"><h4>Application tracking</h4><div class="inline-mini-form"><select id="applicationStatus"><option value="planning">Planning</option><option value="applied">Applied</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="withdrawn">Withdrawn</option></select><input id="applicationNotes" placeholder="Next step or note"/><button id="trackAction" class="button ghost">Save</button></div></div></div>`;
+    $('saveAction').onclick=toggleSave; $('fitAction').onclick=()=>runOpportunityAi('fit'); $('briefAction').onclick=()=>runOpportunityAi('brief'); $('workspaceAction').onclick=startOrOpenWorkspace; $('trackAction').onclick=saveApplication;
+  }
+  async function toggleSave(){if(!requireAuth())return;const row=state.selected;try{const result=row.saved?await api(`/api/opportunities/${row.id}/save`,{method:'DELETE'}):await api(`/api/opportunities/${row.id}/save`,{method:'POST',body:'{}'});row.saved=result.saved;renderOpportunityDetail();toast(row.saved?'Saved to shortlist.':'Removed from shortlist.')}catch(e){toast(e.message)}}
+  async function runOpportunityAi(kind){if(!requireAuth())return;const btn=$(kind==='fit'?'fitAction':'briefAction');btn.disabled=true;const old=btn.textContent;btn.textContent='Working…';$('opportunityAiSection').hidden=false;$('opportunityAiBox').textContent='Radar is analysing the opportunity against your saved context…';try{const data=await api(`/api/opportunities/${state.selected.id}/${kind}`,{method:'POST',body:'{}'});$('opportunityAiBox').textContent=data.explanation||data.text||'Analysis complete.';if(data.fitScore!=null)state.selected.fitScore=data.fitScore;}catch(e){$('opportunityAiBox').textContent=e.message}finally{btn.disabled=false;btn.textContent=old}}
+  async function saveApplication(){if(!requireAuth())return;try{await api(`/api/opportunities/${state.selected.id}/applications`,{method:'POST',body:JSON.stringify({status:$('applicationStatus').value,notes:$('applicationNotes').value})});toast('Application pipeline updated.')}catch(e){toast(e.message)}}
+  async function startOrOpenWorkspace(){if(!requireAuth())return;try{const workspace=state.selected.workspace?.id?await api(`/api/workspaces/${state.selected.workspace.id}`):await api(`/api/opportunities/${state.selected.id}/workspace`,{method:'POST',body:'{}'});state.workspace=workspace;state.activeDocumentId=workspace.documents?.[0]?.id||null;showView('workspace');await loadWorkspaces();renderWorkspace();toast(state.selected.workspace?'Workspace opened.':'Application workspace created.');}catch(e){toast(e.message)}}
+
+  function workspaceCard(w){return `<article class="workspace-card${state.workspace?.id===w.id?' active':''}" data-workspace-id="${escape(w.id)}"><div class="document-title-row"><div><h3>${escape(w.opportunity?.title||w.name)}</h3><p>${escape(w.opportunity?.organization||'')} · ${escape(statusLabel(w.status))}</p></div><span class="status-pill ${escape(w.status)}">${escape(w.progress)}%</span></div><div class="progress-track"><span style="width:${Math.max(0,Math.min(100,Number(w.progress||0)))}%"></span></div><p>${escape(deadline(w.submissionDeadline||w.opportunity?.deadline))}</p></article>`}
+  async function loadWorkspaces(){
+    const el=$('workspaceList'); if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in to create and manage application workspaces.</div>';return;} el.innerHTML='<div class="loading-card"></div>';
+    try{const data=await api('/api/me/workspaces');state.workspaces=data.items||[];el.innerHTML=state.workspaces.length?state.workspaces.map(workspaceCard).join(''):'<div class="empty-state">No application workspaces yet. Start one from Discovery.</div>';el.querySelectorAll('[data-workspace-id]').forEach((node)=>node.onclick=()=>openWorkspace(node.dataset.workspaceId)); if(state.workspace){const fresh=state.workspaces.find((x)=>x.id===state.workspace.id);if(fresh)state.workspace={...state.workspace,...fresh};}}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}
+  }
+  async function openWorkspace(id){try{state.workspace=await api(`/api/workspaces/${id}`);if(!state.activeDocumentId||!state.workspace.documents?.some((d)=>d.id===state.activeDocumentId))state.activeDocumentId=state.workspace.documents?.[0]?.id||null;renderWorkspace();await loadWorkspaces();updateAiContext();}catch(e){toast(e.message)}}
+  function renderWorkspace(){
+    const w=state.workspace, canvas=$('workspaceCanvas'); if(!w){canvas.innerHTML='<div class="empty-panel large"><span>▣</span><strong>Open a workspace</strong><p>Start from an opportunity in Discovery, or select an existing workspace here.</p></div>';return;}
+    const docs=w.documents||[], members=w.members||[], comments=w.comments||[]; const active=docs.find((d)=>d.id===state.activeDocumentId)||docs[0]; if(active)state.activeDocumentId=active.id;
+    const aiPlan=w.aiPlan?`<div class="ai-plan">${escape(w.aiPlan)}</div>`:'<div class="empty-state">No AI preparation plan yet. Radar can identify hard constraints, evidence gaps, specialist needs, required documents and a practical timeline.</div>';
+    const docRows=docs.map((d)=>`<article class="workspace-document${active?.id===d.id?' active':''}" data-doc-select="${escape(d.id)}"><div class="document-title-row"><div><h3>${escape(d.title)}</h3><p>Version ${escape(d.version)} · ${d.generatedByAi?'AI drafted':'Manual / pending'}</p></div><span class="status-pill ${escape(d.status)}">${escape(statusLabel(d.status))}</span></div>${active?.id===d.id?`<div class="document-editor"><textarea id="activeDocumentContent" placeholder="Draft content…">${escape(d.content||'')}</textarea><div class="detail-actions"><button class="button ghost" data-doc-action="save" data-doc-id="${escape(d.id)}">Save version</button><button class="button accent" data-doc-action="draft" data-doc-id="${escape(d.id)}">✦ AI Autofill</button><button class="button ghost" data-doc-action="review" data-doc-id="${escape(d.id)}">AI Review</button><select id="activeDocumentStatus"><option value="pending" ${d.status==='pending'?'selected':''}>Pending</option><option value="drafting" ${d.status==='drafting'?'selected':''}>Drafting</option><option value="review" ${d.status==='review'?'selected':''}>Review</option><option value="approved" ${d.status==='approved'?'selected':''}>Approved</option><option value="complete" ${d.status==='complete'?'selected':''}>Complete</option></select></div><div id="documentReviewOutput" class="review-output" hidden></div></div>`:''}</article>`).join('');
+    const memberRows=members.map((m)=>`<div class="member-row"><strong>${escape(m.name||m.email)}</strong><small>${escape(m.role)} · ${escape(m.status)}</small></div>`).join('')||'<div class="empty-state">No collaborators yet.</div>';
+    const commentRows=comments.map((c)=>`<div class="comment-row"><strong>${escape(c.authorName||'Reviewer')}</strong><small>${escape(fmtDateTime(c.createdAt))} · ${escape(c.status)}</small><p>${escape(c.body)}</p>${c.status!=='resolved'?`<button class="text-button" data-comment-resolve="${escape(c.id)}">Resolve</button>`:''}</div>`).join('')||'<div class="empty-state">No review comments yet.</div>';
+    canvas.innerHTML=`<section class="workspace-header-card"><div class="document-title-row"><div><span class="eyebrow">${escape(w.opportunity?.type||'Application')}</span><h2>${escape(w.opportunity?.title||w.name)}</h2><div class="org">${escape(w.opportunity?.organization||'')} · ${escape(w.opportunity?.country||'')}</div></div><span class="status-pill ${escape(w.status)}">${escape(statusLabel(w.status))}</span></div><div class="workspace-meta"><span class="tag deadline">${escape(deadline(w.submissionDeadline||w.opportunity?.deadline))}</span><span class="tag">${escape(w.progress)}% prepared</span><span class="tag">${escape(docs.length)} required docs</span><span class="tag">${escape(members.length)} collaborators</span></div></section><section class="workspace-section"><div class="section-heading"><div><h2>Radar AI plan</h2><p>Grounded bid/apply strategy and next best action</p></div><button id="workspaceAiPlan" class="button accent">✦ Generate / refresh</button></div>${aiPlan}</section><section class="workspace-section"><div class="section-heading"><div><h2>Required documents</h2><p>Draft, review and approve the submission package</p></div></div><div class="document-list">${docRows}</div></section><section class="workspace-section"><div class="section-heading"><div><h2>Team review</h2><p>Collaborators, comments and AI review summary</p></div><button id="teamSummaryButton" class="button ghost">✦ Summarize review</button></div><div id="teamSummaryOutput" class="review-output" hidden></div><div class="team-grid"><div><h3>Members</h3><div class="member-list">${memberRows}</div><form id="memberForm" class="inline-mini-form"><input id="memberEmail" type="email" required placeholder="reviewer@example.com"/><select id="memberRole"><option value="reviewer">Reviewer</option><option value="editor">Editor</option><option value="viewer">Viewer</option></select><button class="button ghost" type="submit">Add</button></form></div><div><h3>Comments</h3><div class="comment-list">${commentRows}</div><form id="commentForm" class="inline-mini-form"><input id="commentBody" required placeholder="Add a review comment…"/><button class="button ghost" type="submit">Comment</button></form></div></div></section><section class="workspace-section"><div class="finalize-row"><div><h2>Final submission state</h2><p>Radar can prepare and validate the package. Recording a submission requires your explicit confirmation and does not submit to the external portal.</p></div><div class="detail-actions"><button id="finalizeWorkspace" class="button ghost">Finalize package</button><button id="recordSubmission" class="button primary" ${w.status==='ready'?'':'disabled'}>Record submission</button></div></div></section>`;
+    bindWorkspaceControls();
+  }
+  function bindWorkspaceControls(){
+    $('workspaceAiPlan').onclick=generateWorkspacePlan;
+    document.querySelectorAll('[data-doc-select]').forEach((el)=>el.onclick=(ev)=>{if(ev.target.closest('[data-doc-action],select,textarea,button'))return;state.activeDocumentId=el.dataset.docSelect;renderWorkspace();});
+    document.querySelectorAll('[data-doc-action]').forEach((el)=>el.onclick=()=>workspaceDocumentAction(el.dataset.docAction,el.dataset.docId));
+    $('memberForm').onsubmit=addWorkspaceMember;$('commentForm').onsubmit=addWorkspaceComment;$('teamSummaryButton').onclick=generateTeamSummary;$('finalizeWorkspace').onclick=finalizeWorkspace;$('recordSubmission').onclick=recordSubmission;
+    document.querySelectorAll('[data-comment-resolve]').forEach((el)=>el.onclick=()=>resolveComment(el.dataset.commentResolve));
+  }
+  async function generateWorkspacePlan(){if(!requireAuth()||!state.workspace)return;const buttons=[$('workspaceAiPlan'),$('workspaceAiPlanTop')].filter(Boolean);buttons.forEach((b)=>{b.disabled=true;b.dataset.old=b.textContent;b.textContent='Building…'});try{const data=await api(`/api/workspaces/${state.workspace.id}/ai/plan`,{method:'POST',body:'{}'});state.workspace.aiPlan=data.text;state.workspace.aiPlanStructured=data.structured;renderWorkspace();toast('AI preparation plan updated.')}catch(e){toast(e.message)}finally{buttons.forEach((b)=>{b.disabled=false;b.textContent=b.dataset.old||'✦ Build AI plan'})}}
+  async function workspaceDocumentAction(action,documentId){if(!state.workspace)return;const doc=state.workspace.documents.find((d)=>d.id===documentId);if(!doc)return;try{
+    if(action==='save'){const content=$('activeDocumentContent')?.value||'';const status=$('activeDocumentStatus')?.value||doc.status;const updated=await api(`/api/workspaces/${state.workspace.id}/documents/${documentId}`,{method:'PATCH',body:JSON.stringify({content,status})});Object.assign(doc,updated);toast('Document version saved.');await refreshWorkspace();}
+    if(action==='draft'){const instruction=prompt('Optional drafting instruction (leave blank to use the default grounded draft):','')??'';const data=await api(`/api/workspaces/${state.workspace.id}/documents/${documentId}/ai-draft`,{method:'POST',body:JSON.stringify({instruction})});Object.assign(doc,data.document);toast('AI draft created for review.');await refreshWorkspace();}
+    if(action==='review'){const output=$('documentReviewOutput');output.hidden=false;output.textContent='Reviewing against the opportunity and current package…';const data=await api(`/api/workspaces/${state.workspace.id}/documents/${documentId}/ai-review`,{method:'POST',body:'{}'});output.textContent=data.text||'Review complete.';}
+  }catch(e){toast(e.message)}}
+  async function refreshWorkspace(){if(!state.workspace)return;state.workspace=await api(`/api/workspaces/${state.workspace.id}`);renderWorkspace();await loadWorkspaces();}
+  async function addWorkspaceMember(event){event.preventDefault();try{await api(`/api/workspaces/${state.workspace.id}/members`,{method:'POST',body:JSON.stringify({email:$('memberEmail').value.trim(),role:$('memberRole').value})});toast('Collaborator added to workspace.');await refreshWorkspace();}catch(e){toast(e.message)}}
+  async function addWorkspaceComment(event){event.preventDefault();try{await api(`/api/workspaces/${state.workspace.id}/comments`,{method:'POST',body:JSON.stringify({body:$('commentBody').value.trim(),documentId:state.activeDocumentId})});toast('Review comment added.');await refreshWorkspace();}catch(e){toast(e.message)}}
+  async function resolveComment(id){try{await api(`/api/workspaces/${state.workspace.id}/comments/${id}`,{method:'PATCH',body:JSON.stringify({status:'resolved'})});await refreshWorkspace();}catch(e){toast(e.message)}}
+  async function generateTeamSummary(){const out=$('teamSummaryOutput');out.hidden=false;out.textContent='Summarising unresolved review work…';try{const data=await api(`/api/workspaces/${state.workspace.id}/ai/team-summary`,{method:'POST',body:'{}'});out.textContent=data.text||'No unresolved review work.';}catch(e){out.textContent=e.message}}
+  async function finalizeWorkspace(){try{await api(`/api/workspaces/${state.workspace.id}/finalize`,{method:'POST',body:'{}'});toast('Package marked ready for submission.');await refreshWorkspace();await loadNotifications();}catch(e){toast(e.details?.length?`${e.message} ${e.details.join(', ')}`:e.message)}}
+  async function recordSubmission(){if(!confirm('Record this application as submitted? Radar will update your tracking state, but it will not submit to the external portal.'))return;try{await api(`/api/workspaces/${state.workspace.id}/submit`,{method:'POST',body:JSON.stringify({confirmation:true})});toast('Submission recorded in Radar.');await refreshWorkspace();await loadApplications();await loadNotifications();}catch(e){toast(e.message)}}
+
+  async function loadApplications(){
+    const el=$('applicationList');if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in to track applications.</div>';return;}el.innerHTML='<div class="loading-card"></div>';
+    try{const data=await api('/api/me/applications');state.applications=data.items||[];const buckets=[['planning','Planning'],['applied','Submitted'],['progress','Progressed']];const group=(key)=>key==='progress'?state.applications.filter((x)=>['interview','offer'].includes(x.status)):state.applications.filter((x)=>x.status===key);el.innerHTML=buckets.map(([key,label])=>`<section class="pipeline-column"><h2>${escape(label)} · ${group(key).length}</h2>${group(key).map((x)=>`<article class="application-card"><h3>${escape(x.opportunity?.title||'Opportunity')}</h3><p>${escape(x.opportunity?.organization||'')} · ${escape(x.notes||'No notes')}</p><span class="tag">${escape(statusLabel(x.status))}</span></article>`).join('')||'<div class="empty-state">Nothing here yet.</div>'}</section>`).join('');$('applicationSummary').innerHTML=[['Tracked',state.applications.length,'All pipeline records'],['Submitted',state.applications.filter((x)=>['applied','interview','offer','rejected'].includes(x.status)).length,'Recorded submissions'],['Interviews',state.applications.filter((x)=>x.status==='interview').length,'Interview progression'],['Offers',state.applications.filter((x)=>x.status==='offer').length,'Positive outcomes']].map(([l,v,n])=>`<article class="stat-card"><span>${l}</span><strong>${v}</strong><small>${n}</small></article>`).join('');}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}
   }
 
-  function requireAuth() { if (state.session) return true; toast('Sign in with Tuku to use this action.'); return false; }
+  async function loadDocumentLibrary(){
+    const el=$('documentLibrary');if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in to build your reusable document library.</div>';return;}el.innerHTML='<div class="loading-card"></div>';
+    try{const data=await api('/api/me/documents');const docs=data.items||[];el.innerHTML=docs.length?docs.map((d)=>`<article class="library-card"><div class="document-title-row"><div><h3>${escape(d.title)}</h3><p>${escape(d.fileName||'Stored text')} · updated ${escape(fmtDate(d.updatedAt))}</p></div><span class="status-pill">${escape(d.category)}</span></div><div class="meta-row"><span class="tag">${d.hasContent?'AI-ready':'Metadata only'}</span>${d.lastReviewedAt?'<span class="tag">Reviewed</span>':''}${d.expiresAt?`<span class="tag deadline">Expires ${escape(fmtDate(d.expiresAt))}</span>`:''}</div><div class="library-actions"><span class="form-message">Used only as grounded context when relevant.</span><button class="text-button" data-library-delete="${escape(d.id)}">Delete</button></div></article>`).join(''):'<div class="empty-state">No golden documents yet. Add a CV, capability statement, bio or reusable evidence.</div>';el.querySelectorAll('[data-library-delete]').forEach((b)=>b.onclick=()=>deleteLibraryDocument(b.dataset.libraryDelete));}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}
+  }
+  async function saveLibraryDocument(event){event.preventDefault();if(!requireAuth())return;const msg=$('documentFormMessage');msg.textContent='Saving…';try{const file=$('documentFile').files?.[0];if(file&&file.size>5*1024*1024)throw new Error('Reusable documents must be 5 MB or smaller.');const payload={title:$('documentTitle').value.trim(),category:$('documentCategory').value,content:$('documentContent').value.trim()};if(file){payload.fileName=file.name;payload.mimeType=file.type||'application/pdf';payload.base64=await fileToBase64(file);}await api('/api/me/documents',{method:'POST',body:JSON.stringify(payload)});$('documentForm').reset();$('documentForm').hidden=true;msg.textContent='';toast('Golden document saved.');await loadDocumentLibrary();}catch(e){msg.textContent=e.message}}
+  async function deleteLibraryDocument(id){if(!confirm('Delete this reusable document from Radar?'))return;try{await api(`/api/me/documents/${id}`,{method:'DELETE'});toast('Document removed.');await loadDocumentLibrary();}catch(e){toast(e.message)}}
 
-  async function loadStats() {
-    try {
-      const s = await api('/api/stats');
-      const items = [['Live',s.live,'Open opportunities'],['Remote',s.remote,'Location-flexible'],['Closing soon',s.closingSoon,'Within 14 days'],['Sources',s.activeSources,'Active scan feeds']];
-      $('statsGrid').innerHTML = items.map(([l,v,n]) => `<article class="stat-card"><span>${escape(l)}</span><strong>${Number(v||0).toLocaleString()}</strong><small>${escape(n)}</small></article>`).join('');
-      $('sourceStatus').textContent = `${Number(s.activeSources||0)} active sources`;
-    } catch { $('statsGrid').innerHTML = ''; }
+  async function loadAnalytics(){
+    const cards=$('analyticsCards'),detail=$('analyticsDetail');if(!requireAuth()){cards.innerHTML='<div class="empty-state">Sign in to see opportunity and application analytics.</div>';detail.innerHTML='';return;}cards.innerHTML='<div class="loading-card"></div>';
+    try{const a=await api('/api/me/analytics');const metrics=[['Average fit',a.quality.averageFitScore==null?'—':`${a.quality.averageFitScore}%`,'Average score across AI/fit assessments'],['Active workspaces',a.pipeline.activeWorkspaces,'Packages currently being prepared'],['Progression rate',`${a.outcomes.progressionRate}%`,'Submitted applications reaching interview or offer'],['Reusable docs',a.pipeline.reusableDocuments,'Grounding assets in your library'],['Saved',a.pipeline.saved,'Opportunities in your shortlist'],['Workspace progress',`${a.quality.averageWorkspaceProgress}%`,'Average preparation completion']];cards.innerHTML=metrics.map(([l,v,p])=>`<article class="metric-card"><span class="metric-label">${escape(l)}</span><strong>${escape(v)}</strong><p>${escape(p)}</p></article>`).join('');const statuses=a.pipeline.byStatus||{};const max=Math.max(1,...Object.values(statuses).map(Number));detail.innerHTML=`<h2>Application pipeline distribution</h2><div class="analytics-bars">${Object.entries(statuses).map(([k,v])=>`<div class="analytics-bar-row"><span>${escape(statusLabel(k))}</span><div class="analytics-bar"><span style="width:${Math.round((Number(v)/max)*100)}%"></span></div><strong>${escape(v)}</strong></div>`).join('')||'<div class="empty-state">No application outcomes recorded yet.</div>'}</div>`;}catch(e){cards.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`;detail.innerHTML=''}
   }
 
-  function card(row) {
-    const selected = state.selected?.id === row.id ? ' selected' : '';
-    const score = row.fitScore === null || row.fitScore === undefined ? '<span class="score unknown">—</span>' : `<span class="score">${Math.round(row.fitScore)}%</span>`;
-    return `<article class="opportunity-card${selected}" data-id="${escape(row.id)}"><div class="card-top"><div><h3>${escape(row.title)}</h3><div class="org">${escape(row.organization || 'Organisation not listed')}</div></div>${score}</div><div class="meta-row">${row.type?`<span class="tag">${escape(row.type)}</span>`:''}${row.country?`<span class="tag">${escape(row.country)}</span>`:''}${row.remote?'<span class="tag">Remote</span>':''}<span class="tag deadline">${escape(deadline(row.deadline))}</span>${row.saved?'<span class="tag">Saved</span>':''}</div><p class="card-description">${escape(row.summary || row.description || 'Open the opportunity for full details.')}</p></article>`;
-  }
+  async function loadProfile(){if(!requireAuth())return;try{const u=await api('/api/me/profile'),p=u.preferences||{};$('profileName').value=u.name||'';$('profilePhone').value=u.phone||'';$('profileLookingFor').value=p.whatLookingFor||'';$('profileType').value=p.profileType||'individual';$('profileRecruitSpecialists').checked=p.canRecruitSpecialists===true;$('profileScanPreset').value=p.scanPreset||((p.profileType==='firm'||p.profileType==='both')?'consulting-firm':'strong-fit-role');$('profileSkills').value=(u.skills||[]).join(', ');$('profileIndustries').value=(u.industries||[]).join(', ');$('profileTypes').value=(p.types||[]).join(', ');$('profileCountries').value=(p.countries||[]).join(', ');$('profileRegions').value=(p.regions||[]).join(', ');$('profileRemote').checked=p.remote===true;$('resumeStatus').textContent=u.resume?.uploaded?`Using ${u.resume.fileName||'uploaded CV'} for matching.`:'No CV uploaded yet.';const sub=await api('/api/me/subscription');state.subscription=sub;$('planChip').textContent=sub.tier==='enterprise'?'Enterprise':sub.tier==='professional'?'Professional':'Starter';}catch(e){toast(e.message)}}
+  async function saveProfile(event){event.preventDefault();if(!requireAuth())return;const msg=$('profileMessage');msg.textContent='Saving…';try{const current=await api('/api/me/profile'),old=current.preferences||{};await api('/api/me/profile',{method:'PUT',body:JSON.stringify({name:$('profileName').value.trim(),phone:$('profilePhone').value.trim(),skills:list($('profileSkills').value),industries:list($('profileIndustries').value),preferences:{...old,whatLookingFor:$('profileLookingFor').value.trim(),profileType:$('profileType').value,canRecruitSpecialists:$('profileRecruitSpecialists').checked,scanPreset:$('profileScanPreset').value,types:list($('profileTypes').value),countries:list($('profileCountries').value),regions:list($('profileRegions').value),remote:$('profileRemote').checked}})});msg.textContent='Saved. Discovery ranking and AI preparation will use this context.';toast('Matching profile updated.');await loadSession();await loadOpportunities();}catch(e){msg.textContent=e.message}}
+  async function uploadResume(){if(!requireAuth())return;const file=$('resumeFile').files?.[0];if(!file){toast('Choose a PDF or TXT file first.');return;}if(file.size>5*1024*1024){toast('CV files must be 5 MB or smaller.');return;}const btn=$('uploadResume');btn.disabled=true;btn.textContent='Reading CV…';try{const base64=await fileToBase64(file);const data=await api('/api/me/resume',{method:'POST',body:JSON.stringify({fileName:file.name,mimeType:file.type||'application/pdf',base64})});$('resumeStatus').textContent=`Using ${data.user?.resume?.fileName||file.name} · ${Number(data.characters||0).toLocaleString()} characters extracted.`;if(data.user?.skills?.length)$('profileSkills').value=data.user.skills.join(', ');if(data.user?.industries?.length)$('profileIndustries').value=data.user.industries.join(', ');toast('CV added to Radar profile.')}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='Upload CV'}}
+  async function removeResume(){if(!requireAuth())return;try{await api('/api/me/resume',{method:'DELETE',body:'{}'});$('resumeFile').value='';$('resumeStatus').textContent='No CV uploaded yet.';toast('CV removed from profile.')}catch(e){toast(e.message)}}
+  async function loadBriefing(){if(!requireAuth())return;try{const data=await api('/api/me/briefing'),p=data.preferences||{};$('briefEnabled').checked=p.dailyBriefEnabled===true;$('briefHour').value=String(p.deliveryHour||8);$('briefTimezone').value=p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'Africa/Kampala';$('briefMinFit').value=String(p.minFitScore??60);$('briefMinDays').value=String(p.minDaysToDeadline??7);$('briefEmail').checked=p.emailBrief!==false;$('briefWhatsapp').checked=p.whatsappBrief===true;$('briefPhone').value=state.session?.user?.phone||'';$('briefingMessage').textContent=data.alert?.lastSent?`Last brief sent ${fmtDate(data.alert.lastSent)}.`:'Your brief has not been sent yet.';}catch(e){toast(e.message)}}
+  async function saveBriefing(event){event.preventDefault();if(!requireAuth())return;const msg=$('briefingMessage');msg.textContent='Saving…';try{const data=await api('/api/me/briefing',{method:'PUT',body:JSON.stringify({enabled:$('briefEnabled').checked,deliveryHour:Number($('briefHour').value),timezone:$('briefTimezone').value.trim()||'Africa/Kampala',minFitScore:Number($('briefMinFit').value),minDaysToDeadline:Number($('briefMinDays').value),email:$('briefEmail').checked,whatsapp:$('briefWhatsapp').checked,phone:$('briefPhone').value.trim()})});msg.textContent=data.alert?.active?`Saved for around ${$('briefHour').value}:00 in ${$('briefTimezone').value}.`:'Daily brief paused.';toast('Daily Radar settings saved.')}catch(e){msg.textContent=e.message}}
+  async function previewBrief(){if(!requireAuth())return;const el=$('briefPreviewList');el.innerHTML='<div class="loading-card"></div>';try{const data=await api('/api/me/briefing/preview'),items=data.items||[];el.innerHTML=items.length?items.slice(0,5).map((x)=>`<article class="mini-card"><strong>${escape(x.title)}</strong><small>${escape(x.organization||'')} · ${escape(Math.round(x.fitScore||0))}% fit · ${escape(deadline(x.deadline))}</small></article>`).join(''):'<div class="empty-state">No current opportunities clear your thresholds.</div>';}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}}
 
-  function bindCards(container) { container.querySelectorAll('.opportunity-card').forEach((el) => el.addEventListener('click', () => selectOpportunity(el.dataset.id))); }
-
-  async function loadOpportunities() {
-    const target = $('opportunityList'); target.innerHTML = '<div class="loading-card"></div><div class="loading-card"></div><div class="loading-card"></div>';
-    const p = new URLSearchParams(); const q=$('searchInput').value.trim(), type=$('typeFilter').value, country=$('countryFilter').value.trim();
-    if(q)p.set('q',q); if(type)p.set('type',type); if(country)p.set('country',country); if($('remoteFilter').checked)p.set('remote','true'); p.set('limit','60');
-    try {
-      const data = await api(`/api/opportunities?${p}`); state.opportunities = data.items || [];
-      $('resultMeta').textContent = `${state.opportunities.length} current result${state.opportunities.length===1?'':'s'}${state.session?' · ranked for you':''}`;
-      target.innerHTML = state.opportunities.length ? state.opportunities.map(card).join('') : '<div class="empty-state">No current opportunities match these filters.</div>';
-      bindCards(target);
-      if (state.selected) { const fresh = state.opportunities.find(x=>x.id===state.selected.id); if(fresh){state.selected=fresh; renderDetail();} }
-    } catch (e) { target.innerHTML = `<div class="empty-state">${escape(e.message)}</div>`; }
-  }
-
-  async function selectOpportunity(id) {
-    try { state.selected = await api(`/api/opportunities/${encodeURIComponent(id)}`); renderDetail(); document.querySelectorAll('.opportunity-card').forEach(el => el.classList.toggle('selected',el.dataset.id===id)); } catch(e){toast(e.message)}
-  }
-
-  function renderDetail() {
-    const row = state.selected; if(!row)return;
-    const panel=$('detailPanel');
-    panel.innerHTML = `<div class="detail"><div class="detail-head"><div><span class="eyebrow">${escape(row.type||'Opportunity')}</span><h2>${escape(row.title)}</h2><div class="org">${escape(row.organization||'Organisation not listed')} · ${escape(row.country||'Location not listed')}</div></div>${row.fitScore==null?'<span class="score unknown">—</span>':`<span class="score">${Math.round(row.fitScore)}%</span>`}</div><div class="meta-row">${row.remote?'<span class="tag">Remote</span>':''}<span class="tag deadline">${escape(deadline(row.deadline))}</span>${row.compensation?`<span class="tag">${escape(row.compensation)}</span>`:''}${row.source?`<span class="tag">${escape(row.source)}</span>`:''}</div>${row.sourceUrl?`<a class="source-link" href="${escape(row.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open original source ↗</a>`:''}<div class="detail-actions"><button id="saveAction" class="button secondary">${row.saved?'Remove saved':'Save opportunity'}</button><button id="fitAction" class="button accent">Explain my fit</button><button id="briefAction" class="button secondary">Prepare brief</button></div><div class="detail-section"><h4>Description</h4><p>${escape(row.description||row.summary||'No description available.')}</p></div>${row.requirements?`<div class="detail-section"><h4>Requirements</h4><p>${escape(row.requirements)}</p></div>`:''}<div id="aiSection" class="detail-section" style="display:none"><h4>Radar intelligence</h4><div id="aiBox" class="ai-box"></div></div><div class="detail-section"><h4>Application tracking</h4><div class="application-controls"><select id="applicationStatus"><option value="planning">Planning</option><option value="applied">Applied</option><option value="interview">Interview</option><option value="offer">Offer</option><option value="rejected">Rejected</option><option value="withdrawn">Withdrawn</option></select><textarea id="applicationNotes" rows="2" placeholder="Next step, contact, documents, follow-up…"></textarea></div><div class="detail-actions"><button id="trackAction" class="button primary">Save to pipeline</button></div></div><div class="detail-section"><h4>Deadline</h4><p>${escape(fmtDate(row.deadline))} · ${escape(deadline(row.deadline))}</p></div></div>`;
-    $('saveAction').onclick=toggleSave; $('fitAction').onclick=()=>runAi('fit'); $('briefAction').onclick=()=>runAi('brief'); $('trackAction').onclick=saveApplication;
-  }
-
-  async function toggleSave(){ if(!requireAuth())return; const row=state.selected; try{ const result=row.saved?await api(`/api/opportunities/${row.id}/save`,{method:'DELETE'}):await api(`/api/opportunities/${row.id}/save`,{method:'POST',body:'{}'}); row.saved=result.saved; renderDetail(); await loadOpportunities(); toast(row.saved?'Saved to your shortlist.':'Removed from saved.'); }catch(e){toast(e.message)} }
-  async function runAi(kind){ if(!requireAuth())return; const btn=$(kind==='fit'?'fitAction':'briefAction'); btn.disabled=true; btn.textContent='Working…'; $('aiSection').style.display='block'; $('aiBox').textContent='Radar is analysing the opportunity against your saved context…'; try{const data=await api(`/api/opportunities/${state.selected.id}/${kind}`,{method:'POST',body:'{}'}); $('aiBox').textContent=data.explanation||data.text||'Analysis complete.'; if(data.fitScore!=null){state.selected.fitScore=data.fitScore;}}catch(e){$('aiBox').textContent=e.message}finally{btn.disabled=false;btn.textContent=kind==='fit'?'Explain my fit':'Prepare brief'} }
-  async function saveApplication(){ if(!requireAuth())return; try{await api(`/api/opportunities/${state.selected.id}/applications`,{method:'POST',body:JSON.stringify({status:$('applicationStatus').value,notes:$('applicationNotes').value})});toast('Application pipeline updated.');}catch(e){toast(e.message)} }
-
-  async function loadSaved(){ const el=$('savedList'); if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in with Tuku to keep a shortlist across devices.</div>';return;} el.innerHTML='<div class="loading-card"></div>'; try{const data=await api('/api/me/saved');el.innerHTML=(data.items||[]).length?(data.items||[]).map(card).join(''):'<div class="empty-state">No saved opportunities yet.</div>';bindCards(el);}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`} }
-  async function loadApplications(){ const el=$('applicationList'); if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in with Tuku to track applications.</div>';return;} el.innerHTML='<div class="loading-card"></div>'; try{const data=await api('/api/me/applications');el.innerHTML=(data.items||[]).length?(data.items||[]).map(x=>`<article class="application-card"><div><h3>${escape(x.opportunity?.title)}</h3><p>${escape(x.opportunity?.organization||'')} · ${escape(x.notes||'No notes yet')}</p></div><span class="status-badge">${escape(x.status)}</span></article>`).join(''):'<div class="empty-state">Your application pipeline is empty.</div>';}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`} }
-
-  async function loadProfile(){
-    if(!requireAuth())return;
+  const money = (minor, currency='USD') => minor == null ? 'Custom' : new Intl.NumberFormat(undefined,{style:'currency',currency,maximumFractionDigits:0}).format(Number(minor)/100);
+  async function loadSubscription(){
+    const stateEl=$('subscriptionState'),grid=$('planGrid');
+    stateEl.innerHTML='<div class="loading-card"></div>';grid.innerHTML='';
     try{
-      const u=await api('/api/me/profile'); const p=u.preferences||{};
-      $('profileName').value=u.name||''; $('profilePhone').value=u.phone||'';
-      $('profileLookingFor').value=p.whatLookingFor||''; $('profileType').value=p.profileType||'individual'; $('profileRecruitSpecialists').checked=p.canRecruitSpecialists===true;
-      $('profileScanPreset').value=p.scanPreset||((p.profileType==='firm'||p.profileType==='both')?'consulting-firm':'strong-fit-role');
-      $('profileSkills').value=(u.skills||[]).join(', '); $('profileIndustries').value=(u.industries||[]).join(', '); $('profileTypes').value=(p.types||[]).join(', ');
-      $('profileCountries').value=(p.countries||[]).join(', '); $('profileRegions').value=(p.regions||[]).join(', '); $('profileRemote').checked=p.remote===true;
-      $('resumeStatus').textContent=u.resume?.uploaded?`Using ${u.resume.fileName||'uploaded CV'} for matching.`:'No CV uploaded yet.';
-    }catch(e){toast(e.message)}
+      const catalog=await api('/api/subscriptions/plans');state.subscriptionPlans=catalog;
+      let account=null;if(state.session){account=await api('/api/me/subscription');state.subscription=account;}
+      const plans=catalog.plans||[];
+      const starter=plans.find((p)=>p.code==='starter');
+      const pro=plans.find((p)=>p.code===(state.billingAnnual?'radar-pro-annual':'radar-pro-monthly'));
+      const enterprise=plans.find((p)=>p.code==='enterprise');
+      if(account){
+        const u=account.usage||{};const fmt=(x)=>x?.limit==null?`${Number(x?.used||0)} used`:`${Number(x?.used||0)} / ${x.limit}`;
+        stateEl.innerHTML=`<article class="subscription-state-card"><div><span class="eyebrow">Current plan</span><h2>${escape(account.plan?.name||'Starter')}</h2><p>${account.tukuAccess?`Entitlement managed by Tuku Core · ${escape(account.state||'active')}`:'Starter access managed by Radar with Tuku identity.'}${account.enforcementEnabled?' · plan limits enforced':' · limits in observe-only mode'}</p></div><div class="usage-pills"><span class="usage-pill">Searches ${escape(fmt(u.searches))}</span><span class="usage-pill">AI drafts ${escape(fmt(u.aiDrafts))}</span><span class="usage-pill">Workspaces ${escape(fmt(u.workspaces))}</span></div></article>`;
+      } else stateEl.innerHTML='<article class="subscription-state-card"><div><span class="eyebrow">Plans</span><h2>Sign in to see your usage.</h2><p>Radar identity is handled by Tuku Auth.</p></div></article>';
+      const cards=[starter,pro,enterprise].filter(Boolean);
+      grid.innerHTML=cards.map((plan)=>{
+        const isCurrent=account && ((account.tier==='starter'&&plan.code==='starter')||(account.tier==='professional'&&plan.code.startsWith('radar-pro'))||(account.tier==='enterprise'&&plan.code==='enterprise'));
+        const featured=plan.code.startsWith('radar-pro');
+        const displayMinor=plan.code==='radar-pro-annual'?plan.equivalentMonthlyMinor:plan.priceMinor;
+        const suffix=plan.code==='enterprise'?'':plan.code==='starter'?'/mo':plan.code==='radar-pro-annual'?'/mo equivalent':'/mo';
+        const annualNote=plan.code==='radar-pro-annual'?`<p class="form-message">Billed ${money(plan.priceMinor,plan.currency)} annually.</p>`:'';
+        let action='';
+        if(isCurrent) action='<button class="button ghost" disabled>Current plan</button>';
+        else if(plan.code==='starter') action='<button class="button ghost" disabled>Starter</button>';
+        else if(plan.code==='enterprise') action='<button class="button ghost" disabled>Enterprise · contact Tuku-Tuku</button>';
+        else if(!catalog.checkoutAvailable) action='<button class="button primary" disabled>Billing setup pending</button>';
+        else action=`<button class="button primary" data-checkout-plan="${escape(plan.code)}">Upgrade to Professional</button>`;
+        return `<article class="plan-card${featured?' featured':''}">${featured?'<span class="plan-badge">Most popular</span>':''}<h2>${escape(plan.name.replace(' Annual',''))}</h2><p class="plan-desc">${escape(plan.description||'')}</p><div class="plan-price">${escape(money(displayMinor,plan.currency))} <small>${escape(suffix)}</small></div>${annualNote}<ul class="plan-features">${(plan.features||[]).map((f)=>`<li>${escape(f)}</li>`).join('')}</ul>${action}</article>`;
+      }).join('');
+      grid.querySelectorAll('[data-checkout-plan]').forEach((b)=>b.onclick=()=>checkoutSubscription(b.dataset.checkoutPlan));
+    }catch(e){stateEl.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`;}
   }
+  async function checkoutSubscription(planCode){if(!requireAuth())return;try{const data=await api('/api/subscriptions/checkout',{method:'POST',body:JSON.stringify({planCode})});if(data?.checkoutUrl)location.assign(data.checkoutUrl);else toast(data?.message||'Checkout is not available yet.');}catch(e){toast(e.message)}}
+  function setBillingPeriod(annual){state.billingAnnual=annual===true;$('billingMonthly').classList.toggle('active',!state.billingAnnual);$('billingAnnual').classList.toggle('active',state.billingAnnual);void loadSubscription();}
 
-  async function saveProfile(event){
-    event.preventDefault(); if(!requireAuth())return; const msg=$('profileMessage');msg.textContent='Saving…';
-    try{
-      const current=await api('/api/me/profile'); const old=current.preferences||{};
-      await api('/api/me/profile',{method:'PUT',body:JSON.stringify({
-        name:$('profileName').value.trim(), phone:$('profilePhone').value.trim(), skills:list($('profileSkills').value), industries:list($('profileIndustries').value),
-        preferences:{...old,whatLookingFor:$('profileLookingFor').value.trim(),profileType:$('profileType').value,canRecruitSpecialists:$('profileRecruitSpecialists').checked,scanPreset:$('profileScanPreset').value,types:list($('profileTypes').value),countries:list($('profileCountries').value),regions:list($('profileRegions').value),remote:$('profileRemote').checked}
-      })});
-      msg.textContent='Saved. Radar will rank the live feed and future scans against this context.'; toast('Matching profile updated.'); await loadSession(); await loadOpportunities();
-    }catch(e){msg.textContent=e.message}
-  }
+  async function loadNotifications(){if(!state.session)return;try{const data=await api('/api/me/notifications');state.notifications=data.items||[];$('notificationCount').textContent=String(data.unread||0);$('notificationCount').hidden=!data.unread;renderNotifications();}catch{}}
+  function renderNotifications(){const el=$('notificationList');el.innerHTML=state.notifications.length?state.notifications.map((n)=>`<article class="notification-item${n.readAt?'':' unread'}" data-notification-id="${escape(n.id)}"><strong>${escape(n.title)}</strong><p>${escape(n.body)}</p><small>${escape(fmtDateTime(n.createdAt))}</small></article>`).join(''):'<div class="empty-state">No Radar activity yet.</div>';el.querySelectorAll('[data-notification-id]').forEach((n)=>n.onclick=()=>readNotification(n.dataset.notificationId));}
+  async function readNotification(id){try{await api(`/api/me/notifications/${id}/read`,{method:'PATCH',body:'{}'});await loadNotifications();}catch(e){toast(e.message)}}
+  async function readAllNotifications(){try{await api('/api/me/notifications/read-all',{method:'POST',body:'{}'});await loadNotifications();}catch(e){toast(e.message)}}
 
-  async function fileToBase64(file){
-    const buffer=await file.arrayBuffer(); const bytes=new Uint8Array(buffer); let binary=''; const chunk=0x8000;
-    for(let i=0;i<bytes.length;i+=chunk) binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+chunk,bytes.length)));
-    return btoa(binary);
-  }
-  async function uploadResume(){
-    if(!requireAuth())return; const file=$('resumeFile').files?.[0]; if(!file){toast('Choose a PDF or TXT file first.');return;} if(file.size>5*1024*1024){toast('CV files must be 5 MB or smaller.');return;}
-    const btn=$('uploadResume');btn.disabled=true;btn.textContent='Reading CV…';
-    try{const base64=await fileToBase64(file);const data=await api('/api/me/resume',{method:'POST',body:JSON.stringify({fileName:file.name,mimeType:file.type||'application/pdf',base64})});$('resumeStatus').textContent=`Using ${data.user?.resume?.fileName||file.name} · ${Number(data.characters||0).toLocaleString()} characters extracted.`;if(data.user?.skills?.length)$('profileSkills').value=data.user.skills.join(', ');if(data.user?.industries?.length)$('profileIndustries').value=data.user.industries.join(', ');toast('CV added to your Radar profile.');}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='Upload CV'}
-  }
-  async function removeResume(){if(!requireAuth())return;try{await api('/api/me/resume',{method:'DELETE',body:'{}'});$('resumeFile').value='';$('resumeStatus').textContent='No CV uploaded yet.';toast('CV removed from matching profile.');}catch(e){toast(e.message)}}
+  function openDrawer(id){const el=$(id);el.classList.add('open');el.setAttribute('aria-hidden','false');}
+  function closeDrawer(id){const el=$(id);el.classList.remove('open');el.setAttribute('aria-hidden','true');}
+  function updateAiContext(){const label=$('aiContextLabel');if(state.workspace)label.textContent=`Workspace: ${state.workspace.opportunity?.title||state.workspace.name}`;else if(state.selected)label.textContent=`Opportunity: ${state.selected.title}`;else label.textContent='General Radar context';}
+  async function askRadar(event){event.preventDefault();if(!requireAuth())return;const input=$('aiChatInput'),message=input.value.trim();if(!message)return;const history=$('aiChatHistory');history.insertAdjacentHTML('beforeend',`<div class="chat-message user">${escape(message)}</div><div id="aiThinking" class="chat-message assistant">Thinking with private Radar context…</div>`);input.value='';history.scrollTop=history.scrollHeight;try{const data=await api('/api/ai/chat',{method:'POST',body:JSON.stringify({message,workspaceId:state.workspace?.id||null,opportunityId:state.workspace?null:state.selected?.id||null})});$('aiThinking').outerHTML=`<div class="chat-message assistant">${escape(data.text||'')}</div>`;}catch(e){$('aiThinking').outerHTML=`<div class="chat-message assistant">${escape(e.message)}</div>`}history.scrollTop=history.scrollHeight;}
 
-  async function loadBriefing(){
-    const el=$('briefPreviewList'); if(!requireAuth()){el.innerHTML='<div class="empty-state">Sign in with Tuku to configure a personal morning brief.</div>';return;}
-    try{
-      const data=await api('/api/me/briefing'); const p=data.preferences||{};
-      $('briefEnabled').checked=p.dailyBriefEnabled===true; $('briefHour').value=String(p.deliveryHour||8); $('briefTimezone').value=p.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'Africa/Kampala';
-      $('briefMinFit').value=String(p.minFitScore??60); $('briefMinDays').value=String(p.minDaysToDeadline??7); $('briefEmail').checked=p.emailBrief!==false; $('briefWhatsapp').checked=p.whatsappBrief===true; $('briefPhone').value=state.session?.user?.phone||'';
-      $('briefingMessage').textContent=data.alert?.lastSent?`Last brief sent ${fmtDate(data.alert.lastSent)}.`:'Your brief has not been sent yet.';
-    }catch(e){toast(e.message)}
-  }
-  async function saveBriefing(event){
-    event.preventDefault(); if(!requireAuth())return; const msg=$('briefingMessage'); msg.textContent='Saving…';
-    try{const data=await api('/api/me/briefing',{method:'PUT',body:JSON.stringify({enabled:$('briefEnabled').checked,deliveryHour:Number($('briefHour').value),timezone:$('briefTimezone').value.trim()||'Africa/Kampala',minFitScore:Number($('briefMinFit').value),minDaysToDeadline:Number($('briefMinDays').value),email:$('briefEmail').checked,whatsapp:$('briefWhatsapp').checked,phone:$('briefPhone').value.trim()})});msg.textContent=data.alert?.active?`Saved. Radar will deliver around ${$('briefHour').value}:00 in ${$('briefTimezone').value}.`:'Daily brief paused.';toast('Daily brief settings saved.');await loadSession();}catch(e){msg.textContent=e.message}
-  }
-  async function previewBrief(){
-    if(!requireAuth())return; const el=$('briefPreviewList');el.innerHTML='<div class="loading-card"></div><div class="loading-card"></div>';
-    try{const data=await api('/api/me/briefing/preview'); const items=data.items||[];el.innerHTML=items.length?items.map(card).join(''):'<div class="empty-state">No current opportunities clear your saved fit and deadline thresholds. Radar will stay quiet until something does.</div>';bindCards(el);}catch(e){el.innerHTML=`<div class="empty-state">${escape(e.message)}</div>`}
-  }
+  function showView(name){state.view=name;document.querySelectorAll('.view').forEach((el)=>el.classList.toggle('active',el.id===`${name}View`));document.querySelectorAll('.nav-item').forEach((el)=>el.classList.toggle('active',el.dataset.view===name));if(name==='workspace'){void loadWorkspaces();if(state.workspace)renderWorkspace();}if(name==='applications')void loadApplications();if(name==='documents')void loadDocumentLibrary();if(name==='analytics')void loadAnalytics();if(name==='profile'){void loadProfile();void loadBriefing();}if(name==='subscription')void loadSubscription();window.scrollTo({top:0,behavior:'instant'});}
 
-  function showView(name){state.view=name;document.querySelectorAll('.view').forEach(el=>el.classList.toggle('active',el.id===`${name}View`));document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active',el.dataset.view===name));if(name==='saved')void loadSaved();if(name==='applications')void loadApplications();if(name==='profile')void loadProfile();if(name==='briefing'){void loadBriefing();void previewBrief();}}
-  let debounce; $('searchInput').addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(loadOpportunities,300)}); $('typeFilter').onchange=loadOpportunities;$('countryFilter').addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(loadOpportunities,300)});$('remoteFilter').onchange=loadOpportunities;$('clearFilters').onclick=()=>{$('searchInput').value='';$('typeFilter').value='';$('countryFilter').value='';$('remoteFilter').checked=false;void loadOpportunities()};$('refreshButton').onclick=()=>Promise.all([loadStats(),loadOpportunities()]);$('profileForm').onsubmit=saveProfile;$('briefingForm').onsubmit=saveBriefing;$('previewBrief').onclick=previewBrief;$('uploadResume').onclick=uploadResume;$('removeResume').onclick=removeResume;document.querySelectorAll('.nav-item').forEach(el=>el.onclick=()=>showView(el.dataset.view));
-  $('authButton').onclick=async()=>{if(state.session){try{await api('/api/auth/logout',{method:'POST',body:'{}'});state.session=null;toast('Signed out.');await loadSession();showView('discover');await loadOpportunities();}catch(e){toast(e.message)}}else{await signIn()}};
+  let debounce;
+  $('searchInput').addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(()=>{if(state.view!=='discover')showView('discover');void loadOpportunities();},300)});
+  $('typeFilter').onchange=loadOpportunities;$('countryFilter').addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(loadOpportunities,300)});$('valueFilter').addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(loadOpportunities,350)});$('remoteFilter').onchange=loadOpportunities;
+  $('clearFilters').onclick=()=>{$('searchInput').value='';$('typeFilter').value='';$('countryFilter').value='';$('valueFilter').value='';$('remoteFilter').checked=false;void loadOpportunities()};$('refreshButton').onclick=()=>Promise.all([loadStats(),loadOpportunities()]);
+  $('profileForm').onsubmit=saveProfile;$('briefingForm').onsubmit=saveBriefing;$('previewBrief').onclick=previewBrief;$('uploadResume').onclick=uploadResume;$('removeResume').onclick=removeResume;
+  $('showDocumentForm').onclick=()=>{$('documentForm').hidden=false;$('documentTitle').focus()};$('cancelDocumentForm').onclick=()=>{$('documentForm').hidden=true;$('documentForm').reset()};$('documentForm').onsubmit=saveLibraryDocument;
+  $('workspaceAiPlanTop').onclick=()=>{if(!state.workspace){toast('Open a workspace first.');return;}void generateWorkspacePlan()};
+  $('planChip').onclick=()=>showView('subscription');$('billingMonthly').onclick=()=>setBillingPeriod(false);$('billingAnnual').onclick=()=>setBillingPeriod(true);
+  document.querySelectorAll('.nav-item').forEach((el)=>el.onclick=()=>showView(el.dataset.view));document.querySelectorAll('[data-view-jump]').forEach((el)=>el.onclick=()=>showView(el.dataset.viewJump));
+  $('notificationButton').onclick=()=>{openDrawer('notificationDrawer');void loadNotifications()};$('readAllNotifications').onclick=readAllNotifications;$('aiAssistantButton').onclick=()=>{updateAiContext();openDrawer('aiDrawer')};$('aiChatForm').onsubmit=askRadar;document.querySelectorAll('[data-close-drawer]').forEach((el)=>el.onclick=()=>closeDrawer(el.dataset.closeDrawer));
+  $('authButton').onclick=async()=>{if(state.session){try{await api('/api/auth/logout',{method:'POST',body:'{}'});state.session=null;state.workspace=null;toast('Signed out.');await loadSession();showView('discover');await loadOpportunities();}catch(e){toast(e.message)}}else{await signIn()}};
 
   (async()=>{try{state.config=await api('/api/config');await finishSignIn();await loadSession();await Promise.all([loadStats(),loadOpportunities()]);}catch(e){toast(e.message);await loadSession();await Promise.all([loadStats(),loadOpportunities()]);}})();
 })();
