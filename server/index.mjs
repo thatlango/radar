@@ -19,22 +19,16 @@ const SESSION_TTL_HOURS = Math.max(1, Math.min(168, Number(process.env.SESSION_T
 const COOKIE = 'radar_session';
 
 const SCAN_PRESETS = [
-  {
-    id: 'consulting-firm',
-    name: 'Consulting & implementation opportunities',
-    description: 'Firm, framework, roster and consortium opportunities across programme design, implementation, research, capacity building, private sector development, digital systems and MEL.',
-  },
-  {
-    id: 'strong-fit-role',
-    name: 'Strong-fit roles & individual consultancies',
-    description: 'Paid roles and individual consultancies matched to your skills, experience, geography and hard eligibility requirements.',
-  },
-  {
-    id: 'innovation-entrepreneurship',
-    name: 'Innovation & entrepreneurship',
-    description: 'Innovation ecosystems, incubators, accelerators, venture support, entrepreneurship programmes and MSME growth work.',
-  },
+  { id: 'consulting-firm', name: 'Consulting & implementation opportunities', description: 'Firm, framework, roster and consortium opportunities across programme design, implementation, research, capacity building, private sector development, digital systems and MEL.' },
+  { id: 'strong-fit-role', name: 'Strong-fit roles & individual consultancies', description: 'Paid roles and individual consultancies matched to your skills, experience, geography and hard eligibility requirements.' },
+  { id: 'innovation-entrepreneurship', name: 'Innovation & entrepreneurship', description: 'Innovation ecosystems, incubators, accelerators, venture support, entrepreneurship programmes and MSME growth work.' },
 ];
+
+const WORKSPACE_STATUSES = new Set(['drafting', 'review', 'ready', 'submitted', 'paused', 'closed']);
+const DOCUMENT_STATUSES = new Set(['pending', 'drafting', 'review', 'approved', 'complete']);
+const APPLICATION_STATUSES = new Set(['planning', 'applied', 'interview', 'offer', 'rejected', 'withdrawn']);
+const MEMBER_ROLES = new Set(['owner', 'editor', 'reviewer', 'viewer']);
+const DOCUMENT_CATEGORIES = new Set(['profile', 'cv', 'bio', 'capability', 'reference', 'certificate', 'financial', 'legal', 'portfolio', 'other']);
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '8mb' }));
@@ -83,18 +77,15 @@ function cleanList(value, max = 30) {
 function safePrefs(user) {
   return user?.preferences && typeof user.preferences === 'object' ? user.preferences : {};
 }
+function safeJson(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
 function publicUser(user) {
   const preferences = safePrefs(user);
   return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone,
-    skills: user.parsedSkills,
-    industries: user.parsedIndustries,
-    onboardingComplete: user.onboardingComplete,
-    preferences,
-    isPro: user.isPro,
+    id: user.id, name: user.name, email: user.email, phone: user.phone,
+    skills: user.parsedSkills, industries: user.parsedIndustries,
+    onboardingComplete: user.onboardingComplete, preferences, isPro: user.isPro,
     resume: { uploaded: Boolean(user.resumeText), fileName: user.resumeUrl || null },
   };
 }
@@ -105,6 +96,32 @@ function opportunityView(row, extra = {}) {
     compensation: row.salary, deadline: row.deadline, source: row.source, sourceUrl: row.sourceUrl,
     summary: row.aiSummary, keywords: row.aiKeywords, qualityScore: row.qualityScore, createdAt: row.createdAt,
     ...extra,
+  };
+}
+function documentView(row) {
+  return {
+    id: row.id, title: row.title, kind: row.kind, status: row.status, content: row.content,
+    generatedByAi: row.generatedByAi, version: row.version, metadata: row.metadata,
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
+  };
+}
+function workspaceView(row) {
+  return {
+    id: row.id, name: row.name, status: row.status, progress: row.progress,
+    submissionDeadline: row.submissionDeadline, aiPlan: row.aiPlan, aiPlanStructured: row.aiPlanStructured,
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
+    opportunity: row.opportunity ? opportunityView(row.opportunity) : undefined,
+    documents: Array.isArray(row.documents) ? row.documents.map(documentView) : undefined,
+    members: Array.isArray(row.members) ? row.members.map((m) => ({ id: m.id, userId: m.userId, name: m.name, email: m.email, role: m.role, status: m.status, createdAt: m.createdAt })) : undefined,
+    comments: Array.isArray(row.comments) ? row.comments.map((c) => ({ id: c.id, documentId: c.documentId, authorUserId: c.authorUserId, authorName: c.authorName, body: c.body, status: c.status, createdAt: c.createdAt, resolvedAt: c.resolvedAt })) : undefined,
+  };
+}
+function userDocumentView(row, includeContent = false) {
+  return {
+    id: row.id, title: row.title, category: row.category, fileName: row.fileName, mimeType: row.mimeType,
+    sourceType: row.sourceType, metadata: row.metadata, expiresAt: row.expiresAt, lastReviewedAt: row.lastReviewedAt,
+    createdAt: row.createdAt, updatedAt: row.updatedAt,
+    ...(includeContent ? { content: row.content } : { hasContent: Boolean(row.content) }),
   };
 }
 function daysUntil(date) {
@@ -130,22 +147,22 @@ function deterministicFit(user, opportunity) {
   const countries = Array.isArray(prefs.countries) ? prefs.countries.map((x) => String(x).toLowerCase()) : [];
   const regions = Array.isArray(prefs.regions) ? prefs.regions.map((x) => String(x).toLowerCase()) : [];
   const country = String(opportunity.country || '').toLowerCase();
-  if (countries.some((x) => country.includes(x) || x.includes(country))) score += 8;
-  else if (regions.some((x) => country.includes(x))) score += 5;
+  if (country && countries.some((x) => country.includes(x) || x.includes(country))) score += 8;
+  else if (country && regions.some((x) => country.includes(x))) score += 5;
   const d = daysUntil(opportunity.deadline);
   const minDays = Math.max(0, Math.min(60, Number(prefs.minDaysToDeadline ?? 7)));
   if (d !== null && d < 0) return 0;
   if (d !== null && d < minDays) score -= 12;
   if (d !== null && d >= minDays && d <= 30) score += 4;
-  if ((prefs.profileType === 'firm' || prefs.profileType === 'both') && prefs.canRecruitSpecialists === true && ['consultancy','tender','grant'].includes(opportunity.type)) score += 4;
+  if ((prefs.profileType === 'firm' || prefs.profileType === 'both') && prefs.canRecruitSpecialists === true && ['consultancy', 'tender', 'grant'].includes(opportunity.type)) score += 4;
   return Math.max(0, Math.min(100, score));
 }
-async function aiAssist(instruction, context, subjectRef, capability = 'analyze', maxOutputTokens = 320) {
+async function aiAssist(instruction, context, subjectRef, capability = 'analyze', maxOutputTokens = 320, mode = 'interactive') {
   if (!AI_KEY) throw Object.assign(new Error('Radar AI integration is not configured.'), { status: 503 });
   const response = await fetch(`${CORE_INTERNAL_URL}/api/v1/integrations/ai/assist`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-tuku-product-code': 'radar', 'x-tuku-integration-key': AI_KEY },
-    body: JSON.stringify({ capability, instruction, context, subjectRef, maxOutputTokens }),
+    body: JSON.stringify({ capability, instruction, context, subjectRef, maxOutputTokens, mode }),
     signal: AbortSignal.timeout(Math.max(30000, Math.min(120000, Number(process.env.TUKU_AI_TIMEOUT_MS || 120000)))),
   });
   const payload = await response.json().catch(() => ({}));
@@ -172,27 +189,48 @@ async function briefingPreview(user) {
   const minFit = Math.max(0, Math.min(100, Number(prefs.minFitScore ?? 60)));
   const now = new Date();
   const rows = await prisma.opportunity.findMany({
-    where: {
-      createdAt: { gte: new Date(Date.now() - 7 * 86400000) },
-      OR: [{ deadline: null }, { deadline: { gte: new Date(Date.now() + minDays * 86400000) } }],
-    },
-    orderBy: [{ createdAt: 'desc' }, { qualityScore: 'desc' }],
-    take: 100,
+    where: { createdAt: { gte: new Date(Date.now() - 7 * 86400000) }, OR: [{ deadline: null }, { deadline: { gte: new Date(Date.now() + minDays * 86400000) } }] },
+    orderBy: [{ createdAt: 'desc' }, { qualityScore: 'desc' }], take: 100,
   });
-  return rows
-    .map((row) => ({ row, score: deterministicFit(user, row) }))
+  return rows.map((row) => ({ row, score: deterministicFit(user, row) }))
     .filter((item) => item.score >= minFit && (!item.row.deadline || new Date(item.row.deadline) >= now))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
+    .sort((a, b) => b.score - a.score).slice(0, 10)
     .map((item) => opportunityView(item.row, { fitScore: item.score }));
 }
+function seededDocumentSpecs(type) {
+  if (['tender', 'consultancy', 'grant'].includes(type)) {
+    return [
+      ['Technical Proposal', 'technical_proposal'], ['Compliance Matrix', 'compliance_matrix'],
+      ['Detailed Budget', 'budget'], ['Team & References', 'team_references'], ['Submission Checklist', 'submission_checklist'],
+    ];
+  }
+  if (['job', 'internship', 'fellowship'].includes(type)) {
+    return [['Tailored CV', 'cv'], ['Cover Letter', 'cover_letter'], ['Application Questions', 'application_questions'], ['Submission Checklist', 'submission_checklist']];
+  }
+  return [['Application Narrative', 'application_narrative'], ['Supporting Documents', 'supporting_documents'], ['Submission Checklist', 'submission_checklist']];
+}
+function workspaceProgress(documents) {
+  if (!documents?.length) return 0;
+  const weights = { pending: 0, drafting: 25, review: 60, approved: 90, complete: 100 };
+  return Math.round(documents.reduce((sum, d) => sum + (weights[d.status] ?? 0), 0) / documents.length);
+}
+async function ownedWorkspace(userId, id, include = {}) {
+  return prisma.opportunityWorkspace.findFirst({ where: { id, userId }, include });
+}
+async function createNotification(userId, type, title, body, metadata = {}) {
+  return prisma.notification.create({ data: { userId, type, title: String(title).slice(0, 180), body: String(body).slice(0, 4000), metadata } }).catch(() => null);
+}
+async function libraryContext(userId, limit = 10) {
+  const docs = await prisma.userDocument.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' }, take: limit });
+  return docs.map((d) => ({ title: d.title, category: d.category, content: String(d.content || '').slice(0, 5000) }));
+}
 
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'radar', runtime: 'vps' }));
+app.get('/health', (_req, res) => res.json({ ok: true, service: 'radar', runtime: 'vps', milestone: 'opportunity-os' }));
 app.get('/ready', async (_req, res) => {
-  try { await prisma.$queryRaw`SELECT 1`; res.json({ ok: true, service: 'radar', database: 'ok', aiConfigured: Boolean(AI_KEY) }); }
+  try { await prisma.$queryRaw`SELECT 1`; res.json({ ok: true, service: 'radar', database: 'ok', aiConfigured: Boolean(AI_KEY), milestone: 'opportunity-os' }); }
   catch { res.status(503).json({ ok: false, service: 'radar', database: 'unavailable' }); }
 });
-app.get('/api/config', (_req, res) => res.json({ coreUrl: CORE_BROWSER_URL, clientId: CLIENT_ID, redirectUri: REDIRECT_URI }));
+app.get('/api/config', (_req, res) => res.json({ coreUrl: CORE_BROWSER_URL, clientId: CLIENT_ID, redirectUri: REDIRECT_URI, milestone: 'opportunity-os', aiConfigured: Boolean(AI_KEY) }));
 app.get('/api/scan-profiles', (_req, res) => res.json({ items: SCAN_PRESETS }));
 
 app.post('/api/auth/tuku/exchange', async (req, res, next) => {
@@ -201,8 +239,7 @@ app.post('/api/auth/tuku/exchange', async (req, res, next) => {
     if (!code || !codeVerifier) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'Authorization code and verifier are required.' } });
     const response = await fetch(`${CORE_INTERNAL_URL}/api/v1/sso/exchange`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId: CLIENT_ID, code, redirectUri: REDIRECT_URI, codeVerifier }),
-      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({ clientId: CLIENT_ID, code, redirectUri: REDIRECT_URI, codeVerifier }), signal: AbortSignal.timeout(15000),
     });
     const payload = await response.json().catch(() => ({}));
     const core = payload?.data ?? payload;
@@ -212,16 +249,8 @@ app.post('/api/auth/tuku/exchange', async (req, res, next) => {
     }
     let user = await prisma.user.findUnique({ where: { coreUserId: core.identity.coreUserId } });
     if (!user) user = await prisma.user.findUnique({ where: { email: String(core.identity.email).toLowerCase() } });
-    const data = {
-      coreUserId: core.identity.coreUserId,
-      email: String(core.identity.email).toLowerCase(),
-      emailVerified: core.identity.emailVerified === true,
-      phone: core.identity.phone || undefined,
-      lastLoginAt: new Date(),
-    };
-    user = user
-      ? await prisma.user.update({ where: { id: user.id }, data })
-      : await prisma.user.create({ data: { ...data, name: String(core.identity.email).split('@')[0], parsedSkills: [], parsedIndustries: [] } });
+    const data = { coreUserId: core.identity.coreUserId, email: String(core.identity.email).toLowerCase(), emailVerified: core.identity.emailVerified === true, phone: core.identity.phone || undefined, lastLoginAt: new Date() };
+    user = user ? await prisma.user.update({ where: { id: user.id }, data }) : await prisma.user.create({ data: { ...data, name: String(core.identity.email).split('@')[0], parsedSkills: [], parsedIndustries: [] } });
     const id = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600000);
     await prisma.radarSession.create({ data: { id, userId: user.id, coreOrganizationId: core.authorization.organizationId || null, coreBusinessId: core.authorization.businessId || null, expiresAt } });
@@ -246,22 +275,22 @@ app.get('/api/opportunities', async (req, res, next) => {
     const type = String(req.query.type || '').trim();
     const country = String(req.query.country || '').trim();
     const remote = String(req.query.remote || '').trim();
+    const minValue = Number(req.query.minValue || 0);
     const take = Math.max(1, Math.min(100, Number(req.query.limit || 40)));
     const now = new Date();
-    const where = {
-      AND: [
-        { OR: [{ deadline: null }, { deadline: { gte: now } }] },
-        ...(q ? [{ OR: [{ title: { contains: q, mode: 'insensitive' } }, { organization: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] }] : []),
-        ...(type ? [{ type }] : []),
-        ...(country ? [{ country: { contains: country, mode: 'insensitive' } }] : []),
-        ...(remote === 'true' ? [{ remote: true }] : []),
-      ],
-    };
+    const where = { AND: [
+      { OR: [{ deadline: null }, { deadline: { gte: now } }] },
+      ...(q ? [{ OR: [{ title: { contains: q, mode: 'insensitive' } }, { organization: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] }] : []),
+      ...(type ? [{ type }] : []), ...(country ? [{ country: { contains: country, mode: 'insensitive' } }] : []),
+      ...(remote === 'true' ? [{ remote: true }] : []),
+    ] };
     const session = await sessionFor(req);
     const rows = await prisma.opportunity.findMany({ where, orderBy: [{ qualityScore: 'desc' }, { deadline: 'asc' }, { createdAt: 'desc' }], take: Math.min(100, take * 2) });
+    const filtered = minValue > 0 ? rows.filter((r) => Number(String(r.salary || '').replace(/[^0-9.]/g, '')) >= minValue) : rows;
     const saved = session ? new Set((await prisma.savedOpportunity.findMany({ where: { userId: session.userId }, select: { opportunityId: true } })).map((x) => x.opportunityId)) : new Set();
-    const matches = session ? new Map((await prisma.match.findMany({ where: { userId: session.userId, opportunityId: { in: rows.map((x) => x.id) } } })).map((x) => [x.opportunityId, x])) : new Map();
-    const mapped = rows.map((row) => opportunityView(row, { saved: saved.has(row.id), fitScore: matches.get(row.id)?.finalRank ?? (session ? deterministicFit(session.user, row) : null) }));
+    const workspaceMap = session ? new Map((await prisma.opportunityWorkspace.findMany({ where: { userId: session.userId, opportunityId: { in: filtered.map((x) => x.id) } }, select: { id: true, opportunityId: true, status: true } })).map((x) => [x.opportunityId, x])) : new Map();
+    const matches = session ? new Map((await prisma.match.findMany({ where: { userId: session.userId, opportunityId: { in: filtered.map((x) => x.id) } } })).map((x) => [x.opportunityId, x])) : new Map();
+    const mapped = filtered.map((row) => opportunityView(row, { saved: saved.has(row.id), workspace: workspaceMap.get(row.id) || null, fitScore: matches.get(row.id)?.finalRank ?? (session ? deterministicFit(session.user, row) : null) }));
     if (session) mapped.sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0) || Number(b.qualityScore || 0) - Number(a.qualityScore || 0));
     res.json({ items: mapped.slice(0, take) });
   } catch (error) { next(error); }
@@ -270,8 +299,11 @@ app.get('/api/opportunities/:id', async (req, res) => {
   const row = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
   if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
   const s = await sessionFor(req);
-  const saved = s ? Boolean(await prisma.savedOpportunity.findUnique({ where: { userId_opportunityId: { userId: s.userId, opportunityId: row.id } } })) : false;
-  res.json(opportunityView(row, { saved, fitScore: s ? deterministicFit(s.user, row) : null }));
+  const [saved, workspace] = s ? await Promise.all([
+    prisma.savedOpportunity.findUnique({ where: { userId_opportunityId: { userId: s.userId, opportunityId: row.id } } }),
+    prisma.opportunityWorkspace.findUnique({ where: { userId_opportunityId: { userId: s.userId, opportunityId: row.id } }, select: { id: true, status: true, progress: true } }),
+  ]) : [null, null];
+  res.json(opportunityView(row, { saved: Boolean(saved), workspace, fitScore: s ? deterministicFit(s.user, row) : null }));
 });
 app.get('/api/stats', async (_req, res) => {
   const now = new Date();
@@ -289,21 +321,19 @@ app.put('/api/me/profile', requireSession, async (req, res, next) => {
   try {
     const input = req.body || {};
     const existingPrefs = safePrefs(req.radarSession.user);
-    const incomingPrefs = input.preferences && typeof input.preferences === 'object' ? input.preferences : {};
+    const incomingPrefs = safeJson(input.preferences);
     const preferences = { ...existingPrefs, ...incomingPrefs };
     const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: {
       name: input.name ? String(input.name).trim().slice(0, 120) : req.radarSession.user.name,
       phone: input.phone !== undefined ? String(input.phone || '').trim().slice(0, 40) || null : req.radarSession.user.phone,
       parsedSkills: input.skills ? cleanList(input.skills, 60) : req.radarSession.user.parsedSkills,
       parsedIndustries: input.industries ? cleanList(input.industries, 30) : req.radarSession.user.parsedIndustries,
-      preferences,
-      onboardingComplete: true,
-    }});
+      preferences, onboardingComplete: true,
+    } });
     if (preferences.dailyBriefEnabled !== undefined) await upsertDailyAlert(user.id, preferences);
     res.json(publicUser(user));
   } catch (error) { next(error); }
 });
-
 app.post('/api/me/resume', requireSession, async (req, res, next) => {
   try {
     const fileName = String(req.body?.fileName || 'profile.pdf').slice(0, 180);
@@ -313,49 +343,28 @@ app.post('/api/me/resume', requireSession, async (req, res, next) => {
     const buffer = Buffer.from(base64, 'base64');
     if (buffer.length > 5 * 1024 * 1024) return res.status(413).json({ error: { code: 'FILE_TOO_LARGE', message: 'CV files must be 5 MB or smaller.' } });
     let text = '';
-    if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-      const parsed = await pdfParse(buffer);
-      text = String(parsed.text || '');
-    } else if (mimeType.startsWith('text/') || fileName.toLowerCase().endsWith('.txt')) {
-      text = buffer.toString('utf8');
-    } else {
-      return res.status(415).json({ error: { code: 'UNSUPPORTED_FILE', message: 'Radar currently accepts PDF or plain-text CV/profile files.' } });
-    }
+    if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) text = String((await pdfParse(buffer)).text || '');
+    else if (mimeType.startsWith('text/') || fileName.toLowerCase().endsWith('.txt')) text = buffer.toString('utf8');
+    else return res.status(415).json({ error: { code: 'UNSUPPORTED_FILE', message: 'Radar currently accepts PDF or plain-text CV/profile files.' } });
     text = text.replace(/\u0000/g, '').trim().slice(0, 120000);
-    if (text.length < 80) return res.status(422).json({ error: { code: 'CV_TEXT_UNREADABLE', message: 'Radar could not extract enough text from this file. Try a text-based PDF or paste your skills manually.' } });
-
+    if (text.length < 80) return res.status(422).json({ error: { code: 'CV_TEXT_UNREADABLE', message: 'Radar could not extract enough text from this file.' } });
     let extracted = null;
     if (AI_KEY) {
       try {
-        const ai = await aiAssist(
-          'Extract an opportunity-matching profile from this CV. Return JSON only with keys skills (array max 25), industries (array max 12), summary (string max 500 chars). Do not invent experience.',
-          { resumeText: text.slice(0, 24000) },
-          `radar-resume:${req.radarSession.userId}`, 'extract', 700,
-        );
+        const ai = await aiAssist('Extract an opportunity-matching profile from this CV. Return JSON only with keys skills (array max 25), industries (array max 12), summary (string max 500 chars). Do not invent experience.', { resumeText: text.slice(0, 24000) }, `radar-resume:${req.radarSession.userId}`, 'extract', 700);
         extracted = parsePossibleJson(ai.text);
       } catch (error) { console.warn('[radar] resume profile extraction failed', error); }
     }
-
     const current = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
-    const skills = cleanList(extracted?.skills, 60);
-    const industries = cleanList(extracted?.industries, 30);
-    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: {
-      resumeText: text,
-      resumeUrl: fileName,
-      parsedSkills: skills.length ? skills : current?.parsedSkills || [],
-      parsedIndustries: industries.length ? industries : current?.parsedIndustries || [],
-      onboardingComplete: true,
-    }});
+    const skills = cleanList(extracted?.skills, 60), industries = cleanList(extracted?.industries, 30);
+    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: text, resumeUrl: fileName, parsedSkills: skills.length ? skills : current?.parsedSkills || [], parsedIndustries: industries.length ? industries : current?.parsedIndustries || [], onboardingComplete: true } });
     res.json({ user: publicUser(user), extracted: extracted || null, characters: text.length });
   } catch (error) { next(error); }
 });
 app.delete('/api/me/resume', requireSession, async (req, res, next) => {
-  try {
-    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: null, resumeUrl: null } });
-    res.json(publicUser(user));
-  } catch (error) { next(error); }
+  try { res.json(publicUser(await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: null, resumeUrl: null } }))); }
+  catch (error) { next(error); }
 });
-
 app.get('/api/me/briefing', requireSession, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
   const alert = await prisma.alert.findFirst({ where: { userId: req.radarSession.userId, frequency: 'daily' } });
@@ -364,32 +373,17 @@ app.get('/api/me/briefing', requireSession, async (req, res) => {
 app.put('/api/me/briefing', requireSession, async (req, res, next) => {
   try {
     const current = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
-    const oldPrefs = safePrefs(current);
-    const input = req.body || {};
+    const oldPrefs = safePrefs(current), input = req.body || {};
     const deliveryHour = [8, 9].includes(Number(input.deliveryHour)) ? Number(input.deliveryHour) : 8;
-    const preferences = {
-      ...oldPrefs,
-      dailyBriefEnabled: input.enabled !== false,
-      deliveryHour,
-      timezone: String(input.timezone || oldPrefs.timezone || 'Africa/Kampala').slice(0, 80),
-      emailBrief: input.email !== false,
-      whatsappBrief: input.whatsapp === true,
-      minFitScore: Math.max(0, Math.min(100, Number(input.minFitScore ?? oldPrefs.minFitScore ?? 60))),
-      minDaysToDeadline: Math.max(0, Math.min(60, Number(input.minDaysToDeadline ?? oldPrefs.minDaysToDeadline ?? 7))),
-    };
-    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: {
-      phone: input.phone !== undefined ? String(input.phone || '').trim().slice(0, 40) || null : current?.phone,
-      preferences,
-    }});
+    const preferences = { ...oldPrefs, dailyBriefEnabled: input.enabled !== false, deliveryHour, timezone: String(input.timezone || oldPrefs.timezone || 'Africa/Kampala').slice(0, 80), emailBrief: input.email !== false, whatsappBrief: input.whatsapp === true, minFitScore: Math.max(0, Math.min(100, Number(input.minFitScore ?? oldPrefs.minFitScore ?? 60))), minDaysToDeadline: Math.max(0, Math.min(60, Number(input.minDaysToDeadline ?? oldPrefs.minDaysToDeadline ?? 7))) };
+    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { phone: input.phone !== undefined ? String(input.phone || '').trim().slice(0, 40) || null : current?.phone, preferences } });
     const alert = await upsertDailyAlert(user.id, preferences);
     res.json({ preferences, alert: { id: alert.id, active: alert.active, lastSent: alert.lastSent, sendCount: alert.sendCount } });
   } catch (error) { next(error); }
 });
 app.get('/api/me/briefing/preview', requireSession, async (req, res, next) => {
-  try {
-    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
-    res.json({ items: await briefingPreview(user) });
-  } catch (error) { next(error); }
+  try { const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } }); res.json({ items: await briefingPreview(user) }); }
+  catch (error) { next(error); }
 });
 
 app.post('/api/opportunities/:id/save', requireSession, async (req, res) => {
@@ -397,8 +391,7 @@ app.post('/api/opportunities/:id/save', requireSession, async (req, res) => {
   res.json({ saved: true });
 });
 app.delete('/api/opportunities/:id/save', requireSession, async (req, res) => {
-  await prisma.savedOpportunity.deleteMany({ where: { userId: req.radarSession.userId, opportunityId: req.params.id } });
-  res.json({ saved: false });
+  await prisma.savedOpportunity.deleteMany({ where: { userId: req.radarSession.userId, opportunityId: req.params.id } }); res.json({ saved: false });
 });
 app.get('/api/me/saved', requireSession, async (req, res) => {
   const rows = await prisma.savedOpportunity.findMany({ where: { userId: req.radarSession.userId }, include: { opportunity: true }, orderBy: { savedAt: 'desc' } });
@@ -406,25 +399,20 @@ app.get('/api/me/saved', requireSession, async (req, res) => {
 });
 app.get('/api/me/applications', requireSession, async (req, res) => {
   const rows = await prisma.application.findMany({ where: { userId: req.radarSession.userId }, include: { opportunity: true }, orderBy: { updatedAt: 'desc' } });
-  res.json({ items: rows.map((x) => ({ id: x.id, status: x.status, notes: x.notes, appliedAt: x.appliedAt, opportunity: opportunityView(x.opportunity) })) });
+  res.json({ items: rows.map((x) => ({ id: x.id, status: x.status, notes: x.notes, coverLetter: x.coverLetter, aiGenerated: x.aiGenerated, appliedAt: x.appliedAt, updatedAt: x.updatedAt, opportunity: opportunityView(x.opportunity) })) });
 });
 app.post('/api/opportunities/:id/applications', requireSession, async (req, res) => {
-  const status = ['planning','applied','interview','offer','rejected','withdrawn'].includes(String(req.body?.status)) ? String(req.body.status) : 'planning';
-  const row = await prisma.application.upsert({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: req.params.id } }, update: { status, notes: String(req.body?.notes || '').slice(0, 8000) }, create: { userId: req.radarSession.userId, opportunityId: req.params.id, status, notes: String(req.body?.notes || '').slice(0, 8000) } });
+  const status = APPLICATION_STATUSES.has(String(req.body?.status)) ? String(req.body.status) : 'planning';
+  const data = { status, notes: String(req.body?.notes || '').slice(0, 8000), ...(status === 'applied' ? { appliedAt: new Date() } : {}) };
+  const row = await prisma.application.upsert({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: req.params.id } }, update: data, create: { userId: req.radarSession.userId, opportunityId: req.params.id, ...data } });
   res.json(row);
 });
 app.post('/api/opportunities/:id/fit', requireSession, async (req, res, next) => {
   try {
     const opportunity = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
     if (!opportunity) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
-    const user = req.radarSession.user;
-    const score = deterministicFit(user, opportunity);
-    const preferences = safePrefs(user);
-    const ai = await aiAssist(
-      'Explain this fit in 4 concise sections: Why it fits, Hard constraints, Specialists/partners to add if relevant, and Best next action. If this is a firm profile that can recruit specialists, do not reject only because a sector expert is not currently in-house. Do not invent eligibility, experience, references or partnerships.',
-      { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences, hasResume: Boolean(user.resumeText) }, opportunity: opportunityView(opportunity), deterministicFitScore: score },
-      `radar-opportunity:${opportunity.id}`, 'analyze', 520,
-    );
+    const user = req.radarSession.user, score = deterministicFit(user, opportunity), preferences = safePrefs(user);
+    const ai = await aiAssist('Explain this fit in 4 concise sections: Why it fits, Hard constraints, Specialists/partners to add if relevant, and Best next action. If this is a firm profile that can recruit specialists, do not reject only because a sector expert is not currently in-house. Do not invent eligibility, experience, references or partnerships.', { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences, hasResume: Boolean(user.resumeText) }, opportunity: opportunityView(opportunity), deterministicFitScore: score }, `radar-opportunity:${opportunity.id}`, 'analyze', 520);
     const match = await prisma.match.upsert({ where: { userId_opportunityId: { userId: user.id, opportunityId: opportunity.id } }, update: { gptMatchScore: score, explanation: ai.text, finalRank: score, freshnessScore: Math.max(0, 100 - Math.max(0, daysUntil(opportunity.deadline) ?? 30)) }, create: { userId: user.id, opportunityId: opportunity.id, gptMatchScore: score, explanation: ai.text, finalRank: score, freshnessScore: Math.max(0, 100 - Math.max(0, daysUntil(opportunity.deadline) ?? 30)) } });
     res.json({ fitScore: score, explanation: match.explanation, interactionId: ai.interactionId, model: ai.model });
   } catch (error) { next(error); }
@@ -434,13 +422,293 @@ app.post('/api/opportunities/:id/brief', requireSession, async (req, res, next) 
     const opportunity = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
     if (!opportunity) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
     const user = req.radarSession.user;
-    const ai = await aiAssist(
-      'Prepare a concise opportunity briefing with: What it is, why it may fit this profile, deadline and hard constraints explicitly present, bid/apply recommendation, and a 5-item next-step checklist. Use only supplied facts. If specialists could close domain gaps, say which profiles are needed without implying they are already hired.',
-      { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user) }, opportunity: opportunityView(opportunity) },
-      `radar-brief:${opportunity.id}`, 'summarize', 620,
-    );
+    const ai = await aiAssist('Prepare a concise opportunity briefing with: What it is, why it may fit this profile, deadline and hard constraints explicitly present, bid/apply recommendation, and a 5-item next-step checklist. Use only supplied facts. If specialists could close domain gaps, say which profiles are needed without implying they are already hired.', { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user) }, opportunity: opportunityView(opportunity) }, `radar-brief:${opportunity.id}`, 'summarize', 620);
     await prisma.opportunity.update({ where: { id: opportunity.id }, data: { aiSummary: ai.text } });
     res.json({ text: ai.text, interactionId: ai.interactionId, model: ai.model });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/me/workspaces', requireSession, async (req, res, next) => {
+  try {
+    const rows = await prisma.opportunityWorkspace.findMany({ where: { userId: req.radarSession.userId }, include: { opportunity: true, documents: true, members: true }, orderBy: { updatedAt: 'desc' } });
+    res.json({ items: rows.map((row) => workspaceView({ ...row, progress: workspaceProgress(row.documents) })) });
+  } catch (error) { next(error); }
+});
+app.post('/api/opportunities/:id/workspace', requireSession, async (req, res, next) => {
+  try {
+    const opportunity = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
+    if (!opportunity) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
+    let workspace = await prisma.opportunityWorkspace.findUnique({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: opportunity.id } }, include: { opportunity: true, documents: true, members: true, comments: true } });
+    if (!workspace) {
+      workspace = await prisma.$transaction(async (tx) => {
+        const created = await tx.opportunityWorkspace.create({ data: { userId: req.radarSession.userId, opportunityId: opportunity.id, name: String(req.body?.name || `${opportunity.title} — Application`).slice(0, 180), submissionDeadline: opportunity.deadline || null } });
+        await tx.workspaceDocument.createMany({ data: seededDocumentSpecs(opportunity.type).map(([title, kind]) => ({ workspaceId: created.id, title, kind, status: 'pending' })) });
+        await tx.workspaceMember.create({ data: { workspaceId: created.id, userId: req.radarSession.userId, name: req.radarSession.user.name, email: req.radarSession.user.email, role: 'owner', status: 'active' } });
+        return tx.opportunityWorkspace.findUnique({ where: { id: created.id }, include: { opportunity: true, documents: true, members: true, comments: true } });
+      });
+      await createNotification(req.radarSession.userId, 'workspace_created', 'Application workspace created', `Radar created a preparation workspace for ${opportunity.title}.`, { opportunityId: opportunity.id, workspaceId: workspace.id });
+    }
+    res.json(workspaceView({ ...workspace, progress: workspaceProgress(workspace.documents) }));
+  } catch (error) { next(error); }
+});
+app.get('/api/workspaces/:id', requireSession, async (req, res, next) => {
+  try {
+    const row = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, documents: { orderBy: { createdAt: 'asc' } }, members: { orderBy: { createdAt: 'asc' } }, comments: { orderBy: { createdAt: 'desc' } } });
+    if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const progress = workspaceProgress(row.documents);
+    if (progress !== row.progress) await prisma.opportunityWorkspace.update({ where: { id: row.id }, data: { progress } }).catch(() => undefined);
+    res.json(workspaceView({ ...row, progress }));
+  } catch (error) { next(error); }
+});
+app.patch('/api/workspaces/:id', requireSession, async (req, res, next) => {
+  try {
+    const found = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!found) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const data = {};
+    if (req.body?.name !== undefined) data.name = String(req.body.name || '').trim().slice(0, 180) || found.name;
+    if (req.body?.status !== undefined && WORKSPACE_STATUSES.has(String(req.body.status))) data.status = String(req.body.status);
+    if (req.body?.submissionDeadline !== undefined) data.submissionDeadline = req.body.submissionDeadline ? new Date(req.body.submissionDeadline) : null;
+    res.json(workspaceView(await prisma.opportunityWorkspace.update({ where: { id: found.id }, data, include: { opportunity: true, documents: true, members: true, comments: true } })));
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/ai/plan', requireSession, async (req, res, next) => {
+  try {
+    const row = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, documents: true });
+    if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const library = await libraryContext(user.id, 8);
+    const ai = await aiAssist(
+      'Build a practical application/bid plan. Return JSON only with keys recommendation (pursue|hold|skip), rationale, hardConstraints (array), evidenceGaps (array), specialistNeeds (array), documents (array of {title, nextAction}), timeline (array of {when, action}), and nextBestAction. Use only supplied facts. Missing facts must be labelled as gaps, not guessed.',
+      { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user) }, opportunity: opportunityView(row.opportunity), documents: row.documents.map(documentView), reusableLibrary: library.map((d) => ({ title: d.title, category: d.category })) },
+      `radar-workspace-plan:${row.id}`, 'recommend', 1200, 'background'
+    );
+    const parsed = parsePossibleJson(ai.text);
+    const updated = await prisma.opportunityWorkspace.update({ where: { id: row.id }, data: { aiPlan: ai.text, aiPlanStructured: parsed || undefined, lastAiInteractionId: ai.interactionId || null } });
+    res.json({ text: ai.text, structured: parsed, model: ai.model, interactionId: ai.interactionId, workspace: workspaceView(updated) });
+  } catch (error) { next(error); }
+});
+app.patch('/api/workspaces/:id/documents/:documentId', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const document = await prisma.workspaceDocument.findFirst({ where: { id: req.params.documentId, workspaceId: workspace.id } });
+    if (!document) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
+    const data = {};
+    if (req.body?.status !== undefined && DOCUMENT_STATUSES.has(String(req.body.status))) data.status = String(req.body.status);
+    if (req.body?.content !== undefined) { data.content = String(req.body.content || '').slice(0, 200000); data.version = { increment: 1 }; }
+    if (req.body?.metadata !== undefined) data.metadata = safeJson(req.body.metadata);
+    const updated = await prisma.workspaceDocument.update({ where: { id: document.id }, data });
+    const docs = await prisma.workspaceDocument.findMany({ where: { workspaceId: workspace.id } });
+    await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { progress: workspaceProgress(docs) } });
+    res.json(documentView(updated));
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/documents/:documentId/ai-draft', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, documents: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const document = workspace.documents.find((d) => d.id === req.params.documentId);
+    if (!document) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const library = await libraryContext(user.id, 10);
+    const instruction = `Draft the workspace document titled "${document.title}". Use only facts in the supplied profile, opportunity and reusable document library. Never invent past performance, partners, team members, budgets, certifications, dates, references or eligibility. Where required information is absent, insert an explicit [NEEDS INPUT: ...] placeholder. Preserve a professional submission-ready structure. Do not claim the application has been submitted.`;
+    const ai = await aiAssist(instruction, { profile: { name: user.name, skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), resumeText: String(user.resumeText || '').slice(0, 16000) }, opportunity: opportunityView(workspace.opportunity), reusableLibrary: library, otherWorkspaceDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status, content: String(d.content || '').slice(0, 4000) })), userInstruction: String(req.body?.instruction || '').slice(0, 4000) }, `radar-workspace-doc:${document.id}`, 'draft', 1800, 'background');
+    const updated = await prisma.workspaceDocument.update({ where: { id: document.id }, data: { content: ai.text, generatedByAi: true, status: 'review', version: { increment: 1 }, metadata: { ...safeJson(document.metadata), lastAiInteractionId: ai.interactionId || null, lastAiModel: ai.model || null } } });
+    const docs = await prisma.workspaceDocument.findMany({ where: { workspaceId: workspace.id } });
+    await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { progress: workspaceProgress(docs), status: 'review' } });
+    res.json({ document: documentView(updated), model: ai.model, interactionId: ai.interactionId });
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/documents/:documentId/ai-review', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, documents: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const document = workspace.documents.find((d) => d.id === req.params.documentId);
+    if (!document) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
+    if (!document.content) return res.status(422).json({ error: { code: 'DOCUMENT_EMPTY', message: 'Draft the document before requesting a review.' } });
+    const ai = await aiAssist('Review this draft against the opportunity. Return concise sections: Coverage, Unsupported or risky claims, Missing evidence, Consistency issues, Required edits, and Submission readiness (0-100). Treat any [NEEDS INPUT] placeholders as unresolved. Never invent replacement facts.', { opportunity: opportunityView(workspace.opportunity), document: { title: document.title, content: document.content }, otherDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status })) }, `radar-workspace-review:${document.id}`, 'analyze', 1100, 'background');
+    await prisma.workspaceDocument.update({ where: { id: document.id }, data: { status: 'review', metadata: { ...safeJson(document.metadata), lastReview: ai.text, lastReviewInteractionId: ai.interactionId || null } } });
+    res.json({ text: ai.text, model: ai.model, interactionId: ai.interactionId });
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/finalize', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id, { documents: true, opportunity: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const unresolved = workspace.documents.filter((d) => !['approved', 'complete'].includes(d.status));
+    if (unresolved.length) return res.status(409).json({ error: { code: 'DOCUMENTS_NOT_READY', message: `${unresolved.length} required document(s) still need approval or completion.`, details: unresolved.map((d) => d.title) } });
+    const updated = await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { status: 'ready', progress: 100 } });
+    await createNotification(req.radarSession.userId, 'workspace_ready', 'Application package ready', `${workspace.opportunity.title} is internally ready for submission. Radar has not submitted it.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
+    res.json(workspaceView(updated));
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/submit', requireSession, async (req, res, next) => {
+  try {
+    if (req.body?.confirmation !== true) return res.status(400).json({ error: { code: 'CONFIRMATION_REQUIRED', message: 'Explicit confirmation is required before Radar records an application as submitted.' } });
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    if (workspace.status !== 'ready') return res.status(409).json({ error: { code: 'WORKSPACE_NOT_READY', message: 'Finalize the package before recording submission.' } });
+    await prisma.$transaction([
+      prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { status: 'submitted', progress: 100 } }),
+      prisma.application.upsert({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId } }, update: { status: 'applied', appliedAt: new Date() }, create: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId, status: 'applied', appliedAt: new Date() } }),
+    ]);
+    await createNotification(req.radarSession.userId, 'application_submitted', 'Submission recorded', `You confirmed submission of ${workspace.opportunity.title}.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
+    res.json({ recorded: true, message: 'Submission recorded in Radar. This endpoint records your confirmation; it does not submit to the external opportunity portal.' });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/workspaces/:id/comments', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    res.json({ items: await prisma.workspaceComment.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: 'desc' } }) });
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/comments', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const body = String(req.body?.body || '').trim().slice(0, 8000);
+    if (!body) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'Comment text is required.' } });
+    const documentId = req.body?.documentId ? String(req.body.documentId) : null;
+    if (documentId && !(await prisma.workspaceDocument.findFirst({ where: { id: documentId, workspaceId: workspace.id } }))) return res.status(400).json({ error: { code: 'INVALID_DOCUMENT', message: 'Document does not belong to this workspace.' } });
+    res.json(await prisma.workspaceComment.create({ data: { workspaceId: workspace.id, documentId, authorUserId: req.radarSession.userId, authorName: req.radarSession.user.name || req.radarSession.user.email, body } }));
+  } catch (error) { next(error); }
+});
+app.patch('/api/workspaces/:id/comments/:commentId', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const comment = await prisma.workspaceComment.findFirst({ where: { id: req.params.commentId, workspaceId: workspace.id } });
+    if (!comment) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Comment not found.' } });
+    const status = req.body?.status === 'resolved' ? 'resolved' : 'open';
+    res.json(await prisma.workspaceComment.update({ where: { id: comment.id }, data: { status, resolvedAt: status === 'resolved' ? new Date() : null } }));
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/members', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id);
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 240);
+    if (!email.includes('@')) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'A valid collaborator email is required.' } });
+    const role = MEMBER_ROLES.has(String(req.body?.role)) ? String(req.body.role) : 'reviewer';
+    const knownUser = await prisma.user.findUnique({ where: { email } });
+    const member = await prisma.workspaceMember.upsert({ where: { workspaceId_email: { workspaceId: workspace.id, email } }, update: { role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null }, create: { workspaceId: workspace.id, email, role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null, status: knownUser ? 'active' : 'invited' } });
+    res.json(member);
+  } catch (error) { next(error); }
+});
+app.post('/api/workspaces/:id/ai/team-summary', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await ownedWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, comments: true, documents: true, members: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const ai = await aiAssist('Summarize unresolved team review work. Identify decisions needed, document-specific edits, blockers, owners when explicitly stated, and the next three actions. Do not invent assignments or decisions.', { opportunity: opportunityView(workspace.opportunity), documents: workspace.documents.map((d) => ({ id: d.id, title: d.title, status: d.status })), members: workspace.members.map((m) => ({ name: m.name, email: m.email, role: m.role })), comments: workspace.comments.filter((c) => c.status !== 'resolved').map((c) => ({ documentId: c.documentId, authorName: c.authorName, body: c.body })) }, `radar-team-summary:${workspace.id}`, 'summarize', 850, 'background');
+    res.json({ text: ai.text, model: ai.model, interactionId: ai.interactionId });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/me/documents', requireSession, async (req, res, next) => {
+  try { const rows = await prisma.userDocument.findMany({ where: { userId: req.radarSession.userId }, orderBy: { updatedAt: 'desc' } }); res.json({ items: rows.map((r) => userDocumentView(r, false)) }); }
+  catch (error) { next(error); }
+});
+app.get('/api/me/documents/:id', requireSession, async (req, res, next) => {
+  try { const row = await prisma.userDocument.findFirst({ where: { id: req.params.id, userId: req.radarSession.userId } }); if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } }); res.json(userDocumentView(row, true)); }
+  catch (error) { next(error); }
+});
+app.post('/api/me/documents', requireSession, async (req, res, next) => {
+  try {
+    const title = String(req.body?.title || '').trim().slice(0, 180);
+    if (!title) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'Document title is required.' } });
+    const category = DOCUMENT_CATEGORIES.has(String(req.body?.category)) ? String(req.body.category) : 'other';
+    const fileName = String(req.body?.fileName || '').slice(0, 180) || null;
+    const mimeType = String(req.body?.mimeType || '').slice(0, 120) || null;
+    let content = String(req.body?.content || '').trim();
+    const base64 = String(req.body?.base64 || '').replace(/^data:[^;]+;base64,/, '');
+    if (base64) {
+      const buffer = Buffer.from(base64, 'base64');
+      if (buffer.length > 5 * 1024 * 1024) return res.status(413).json({ error: { code: 'FILE_TOO_LARGE', message: 'Reusable documents must be 5 MB or smaller.' } });
+      if (mimeType === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf')) content = String((await pdfParse(buffer)).text || '');
+      else if (mimeType?.startsWith('text/') || fileName?.toLowerCase().endsWith('.txt')) content = buffer.toString('utf8');
+      else return res.status(415).json({ error: { code: 'UNSUPPORTED_FILE', message: 'Radar currently extracts PDF or TXT reusable documents.' } });
+    }
+    content = content.replace(/\u0000/g, '').trim().slice(0, 180000);
+    const row = await prisma.userDocument.create({ data: { userId: req.radarSession.userId, title, category, fileName, mimeType, content: content || null, sourceType: base64 ? 'upload' : 'manual', metadata: safeJson(req.body?.metadata), expiresAt: req.body?.expiresAt ? new Date(req.body.expiresAt) : null } });
+    res.json(userDocumentView(row, true));
+  } catch (error) { next(error); }
+});
+app.patch('/api/me/documents/:id', requireSession, async (req, res, next) => {
+  try {
+    const found = await prisma.userDocument.findFirst({ where: { id: req.params.id, userId: req.radarSession.userId } });
+    if (!found) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
+    const data = {};
+    if (req.body?.title !== undefined) data.title = String(req.body.title || found.title).slice(0, 180);
+    if (req.body?.category !== undefined && DOCUMENT_CATEGORIES.has(String(req.body.category))) data.category = String(req.body.category);
+    if (req.body?.content !== undefined) data.content = String(req.body.content || '').slice(0, 180000) || null;
+    if (req.body?.metadata !== undefined) data.metadata = safeJson(req.body.metadata);
+    if (req.body?.expiresAt !== undefined) data.expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : null;
+    if (req.body?.reviewed === true) data.lastReviewedAt = new Date();
+    res.json(userDocumentView(await prisma.userDocument.update({ where: { id: found.id }, data }), true));
+  } catch (error) { next(error); }
+});
+app.delete('/api/me/documents/:id', requireSession, async (req, res, next) => {
+  try { await prisma.userDocument.deleteMany({ where: { id: req.params.id, userId: req.radarSession.userId } }); res.status(204).end(); }
+  catch (error) { next(error); }
+});
+
+app.get('/api/me/notifications', requireSession, async (req, res, next) => {
+  try {
+    const rows = await prisma.notification.findMany({ where: { userId: req.radarSession.userId }, orderBy: { createdAt: 'desc' }, take: 60 });
+    res.json({ unread: rows.filter((r) => !r.readAt).length, items: rows });
+  } catch (error) { next(error); }
+});
+app.patch('/api/me/notifications/:id/read', requireSession, async (req, res, next) => {
+  try {
+    const row = await prisma.notification.findFirst({ where: { id: req.params.id, userId: req.radarSession.userId } });
+    if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Notification not found.' } });
+    res.json(await prisma.notification.update({ where: { id: row.id }, data: { readAt: new Date() } }));
+  } catch (error) { next(error); }
+});
+app.post('/api/me/notifications/read-all', requireSession, async (req, res, next) => {
+  try { const result = await prisma.notification.updateMany({ where: { userId: req.radarSession.userId, readAt: null }, data: { readAt: new Date() } }); res.json({ updated: result.count }); }
+  catch (error) { next(error); }
+});
+
+app.get('/api/me/analytics', requireSession, async (req, res, next) => {
+  try {
+    const userId = req.radarSession.userId;
+    const [applications, workspaces, matches, saved, docs] = await Promise.all([
+      prisma.application.findMany({ where: { userId }, select: { status: true, appliedAt: true, updatedAt: true } }),
+      prisma.opportunityWorkspace.findMany({ where: { userId }, select: { status: true, progress: true, createdAt: true, updatedAt: true } }),
+      prisma.match.findMany({ where: { userId }, select: { finalRank: true } }),
+      prisma.savedOpportunity.count({ where: { userId } }), prisma.userDocument.count({ where: { userId } }),
+    ]);
+    const byStatus = applications.reduce((acc, x) => ({ ...acc, [x.status]: (acc[x.status] || 0) + 1 }), {});
+    const submitted = applications.filter((x) => ['applied', 'interview', 'offer', 'rejected'].includes(x.status)).length;
+    const outcomes = applications.filter((x) => ['interview', 'offer'].includes(x.status)).length;
+    res.json({
+      pipeline: { totalApplications: applications.length, byStatus, activeWorkspaces: workspaces.filter((w) => !['submitted', 'closed'].includes(w.status)).length, submittedWorkspaces: workspaces.filter((w) => w.status === 'submitted').length, saved, reusableDocuments: docs },
+      quality: { averageFitScore: matches.length ? Math.round(matches.reduce((s, x) => s + x.finalRank, 0) / matches.length) : null, averageWorkspaceProgress: workspaces.length ? Math.round(workspaces.reduce((s, x) => s + x.progress, 0) / workspaces.length) : 0 },
+      outcomes: { submitted, positiveProgression: outcomes, progressionRate: submitted ? Math.round((outcomes / submitted) * 100) : 0 },
+    });
+  } catch (error) { next(error); }
+});
+app.get('/api/me/subscription', requireSession, async (req, res, next) => {
+  try {
+    const payments = await prisma.payment.findMany({ where: { userId: req.radarSession.userId }, orderBy: { paymentDate: 'desc' }, take: 10 });
+    res.json({ plan: req.radarSession.user.isPro ? 'pro' : 'free', isPro: req.radarSession.user.isPro, payments: payments.map((p) => ({ id: p.id, amount: p.amount, currency: p.currency, status: p.status, type: p.type, paymentDate: p.paymentDate })) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/ai/chat', requireSession, async (req, res, next) => {
+  try {
+    const message = String(req.body?.message || '').trim().slice(0, 6000);
+    if (!message) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'A message is required.' } });
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    let opportunity = null, workspace = null;
+    if (req.body?.workspaceId) workspace = await ownedWorkspace(user.id, String(req.body.workspaceId), { opportunity: true, documents: true, comments: true });
+    else if (req.body?.opportunityId) opportunity = await prisma.opportunity.findUnique({ where: { id: String(req.body.opportunityId) } });
+    const library = await libraryContext(user.id, 6);
+    const ai = await aiAssist('Answer the user as Radar AI, a grounded opportunity preparation assistant. Focus on the supplied opportunity/workspace and profile. Distinguish facts from recommendations. Never invent credentials, partners, budgets, deadlines or submission status. Suggest the next useful action when relevant.', { message, profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user) }, opportunity: opportunity ? opportunityView(opportunity) : workspace?.opportunity ? opportunityView(workspace.opportunity) : null, workspace: workspace ? { id: workspace.id, name: workspace.name, status: workspace.status, documents: workspace.documents.map((d) => ({ title: d.title, status: d.status, content: String(d.content || '').slice(0, 3000) })), unresolvedComments: workspace.comments.filter((c) => c.status !== 'resolved').map((c) => c.body) } : null, reusableDocuments: library.map((d) => ({ title: d.title, category: d.category })) }, `radar-chat:${user.id}:${workspace?.id || opportunity?.id || 'general'}`, 'explain', 900);
+    res.json({ text: ai.text, model: ai.model, interactionId: ai.interactionId });
   } catch (error) { next(error); }
 });
 
