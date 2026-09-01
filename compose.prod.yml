@@ -46,6 +46,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      disable: true
     networks: [radar-internal]
 
 volumes:
