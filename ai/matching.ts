@@ -1,8 +1,8 @@
-import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const CORE_INTERNAL_URL = (process.env.TUKU_CORE_INTERNAL_URL || process.env.TUKU_CORE_URL || 'https://core.tukutuku.org').replace(/\/$/, '');
+const AI_KEY = process.env.TUKU_AI_INTEGRATION_KEY || '';
 
 interface MatchingResult {
   score: number;
@@ -25,7 +25,7 @@ export class AIMatchingEngine {
     if (!user || !opportunity) return;
 
     const preferences = user.preferences && typeof user.preferences === 'object' ? user.preferences as any : {};
-    const gptResult = await this.calculateGPTMatchScore({
+    const aiResult = await this.calculateAIMatchScore({
       resumeText: user.resumeText || '',
       skills: user.parsedSkills || [],
       industries: user.parsedIndustries || [],
@@ -35,62 +35,47 @@ export class AIMatchingEngine {
     const locationScore = this.calculateLocationScore(preferences, opportunity.country, opportunity.remote);
     const freshnessScore = this.calculateFreshnessScore(opportunity.createdAt, opportunity.deadline);
     const behaviorScore = await this.calculateBehavioralScore(userId, opportunity.type);
-    const finalRank = this.calculateFinalRank({ gpt: gptResult.score, location: locationScore, behavior: behaviorScore, freshness: freshnessScore });
+    const finalRank = this.calculateFinalRank({ gpt: aiResult.score, location: locationScore, behavior: behaviorScore, freshness: freshnessScore });
 
     await prisma.match.upsert({
       where: { userId_opportunityId: { userId, opportunityId } },
-      update: { gptMatchScore: gptResult.score, explanation: gptResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
-      create: { userId, opportunityId, gptMatchScore: gptResult.score, explanation: gptResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
+      update: { gptMatchScore: aiResult.score, explanation: aiResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
+      create: { userId, opportunityId, gptMatchScore: aiResult.score, explanation: aiResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
     });
   }
 
-  private async calculateGPTMatchScore(input: any): Promise<MatchingResult> {
+  private async calculateAIMatchScore(input: any): Promise<MatchingResult> {
     const { resumeText, skills, industries, preferences, opportunity } = input;
+    if (!AI_KEY) return this.fallbackResult(skills, preferences, opportunity);
     const profileType = String(preferences.profileType || 'individual');
     const canRecruitSpecialists = preferences.canRecruitSpecialists === true;
     const whatLookingFor = String(preferences.whatLookingFor || '').trim();
-    const prompt = `You are Radar, an opportunity-fit analyst. Score how well this opportunity fits the supplied profile. Use only supplied facts.
-
-PROFILE TYPE: ${profileType}
-WHAT THEY ARE LOOKING FOR: ${whatLookingFor || 'Not specified'}
-SKILLS: ${skills.join(', ') || 'Not specified'}
-INDUSTRIES: ${industries.join(', ') || 'Not specified'}
-CAN RECRUIT/CONTRACT DOMAIN SPECIALISTS: ${canRecruitSpecialists ? 'Yes' : 'No'}
-CV/PROFILE TEXT:\n${String(resumeText || '').slice(0, 18000) || 'No CV supplied'}
-
-OPPORTUNITY:
-Title: ${opportunity.title}
-Organization: ${opportunity.organization}
-Type: ${opportunity.type}
-Country: ${opportunity.country}
-Remote: ${opportunity.remote}
-Description: ${opportunity.description}
-Requirements: ${opportunity.requirements || 'Not specified'}
-
-If profileType is firm or both and CAN RECRUIT is Yes, evaluate whether the organisation can credibly lead programme design, implementation methodology, project management, research, stakeholder engagement, capacity building, enterprise/private-sector support, digital systems, MEL, facilitation, innovation design or QA while recruiting technical specialists. Do not downgrade an otherwise attractive opportunity solely because a sector specialist is not currently in-house; instead identify the specialist gap. Still penalize hard corporate eligibility requirements that cannot be solved by hiring an expert (for example local registration, required audited turnover, mandatory licences, or firm references).
-
-Return valid JSON only:
-{
-  "score": 0-100,
-  "explanation": "2-4 concise sentences explaining fit, hard constraints and best next move",
-  "keySkillMatches": ["..."],
-  "missingRequirements": ["..."],
-  "overqualifications": ["..."]
-}`;
+    const instruction = `Score opportunity fit from 0-100 and return JSON only with score, explanation, keySkillMatches, missingRequirements, overqualifications. Use only supplied facts. If the profile is a firm/both and can recruit specialists, do not reject an attractive opportunity merely because a sector specialist is not currently in-house: identify the specialist gap instead. Still penalize hard corporate eligibility that hiring cannot fix, such as mandatory local registration, audited turnover, licences, or required firm references.`;
+    const context = {
+      profile: {
+        profileType,
+        whatLookingFor,
+        skills,
+        industries,
+        canRecruitSpecialists,
+        resumeText: String(resumeText || '').slice(0, 22000),
+        preferences,
+      },
+      opportunity,
+    };
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: process.env.RADAR_MATCHING_MODEL || 'gpt-4o',
-        messages: [
-          { role: 'system', content: 'Return objective opportunity-fit analysis as valid JSON only. Never invent candidate or firm experience.' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 900,
+      const response = await fetch(`${CORE_INTERNAL_URL}/api/v1/integrations/ai/assist`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-tuku-product-code': 'radar', 'x-tuku-integration-key': AI_KEY },
+        body: JSON.stringify({ capability: 'analyze', instruction, context, subjectRef: `radar-match:${opportunity.organization}:${opportunity.title}`.slice(0, 220), maxOutputTokens: 850 }),
+        signal: AbortSignal.timeout(Math.max(30000, Math.min(120000, Number(process.env.TUKU_AI_TIMEOUT_MS || 120000)))),
       });
-      const raw = completion.choices[0].message.content || '{}';
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-      const result = JSON.parse(cleaned);
+      const payload: any = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error?.message || `Tuku AI returned ${response.status}`);
+      const data = payload?.data ?? payload;
+      const raw = String(data?.text || data?.output || '{}').replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+      const result = JSON.parse(raw);
       return {
         score: Math.min(100, Math.max(0, Number(result.score || 0))),
         explanation: String(result.explanation || 'Match analysis unavailable'),
@@ -99,9 +84,25 @@ Return valid JSON only:
         overqualifications: Array.isArray(result.overqualifications) ? result.overqualifications : [],
       };
     } catch (error) {
-      console.error('[AIMatchingEngine] model error:', error);
-      return { score: 0, explanation: 'Unable to generate AI match score.', keySkillMatches: [], missingRequirements: [], overqualifications: [] };
+      console.error('[AIMatchingEngine] Tuku AI error:', error);
+      return this.fallbackResult(skills, preferences, opportunity);
     }
+  }
+
+  private fallbackResult(skills: string[], preferences: any, opportunity: any): MatchingResult {
+    const haystack = `${opportunity.title} ${opportunity.organization} ${opportunity.description} ${opportunity.requirements || ''}`.toLowerCase();
+    const skillHits = (skills || []).filter((skill) => haystack.includes(String(skill).toLowerCase()));
+    const intentTerms = String(preferences.whatLookingFor || '').toLowerCase().split(/[^a-z0-9+#.-]+/).filter((term: string) => term.length > 2);
+    const intentHits = intentTerms.filter((term: string) => haystack.includes(term));
+    let score = 42 + Math.min(28, skillHits.length * 5) + Math.min(20, intentHits.length * 2);
+    if ((preferences.profileType === 'firm' || preferences.profileType === 'both') && preferences.canRecruitSpecialists && ['consultancy','tender','grant'].includes(opportunity.type)) score += 5;
+    return {
+      score: Math.min(100, score),
+      explanation: `Radar found ${skillHits.length} direct skill matches${intentHits.length ? ` and ${intentHits.length} target-intent matches` : ''}. Run the detailed fit analysis for hard eligibility and specialist gaps.`,
+      keySkillMatches: skillHits.slice(0, 10),
+      missingRequirements: [],
+      overqualifications: [],
+    };
   }
 
   private calculateLocationScore(preferences: any, opportunityCountry: string, isRemote: boolean): number {
@@ -141,10 +142,7 @@ Return valid JSON only:
   }
 
   async matchNewOpportunity(opportunityId: string): Promise<void> {
-    const users = await prisma.user.findMany({
-      where: { OR: [{ resumeText: { not: null } }, { onboardingComplete: true }] },
-      select: { id: true },
-    });
+    const users = await prisma.user.findMany({ where: { OR: [{ resumeText: { not: null } }, { onboardingComplete: true }] }, select: { id: true } });
     for (const user of users) {
       try { await this.generateMatch(user.id, opportunityId); await this.sleep(250); }
       catch (error) { console.error(`[AIMatchingEngine] user ${user.id}:`, error); }
@@ -153,13 +151,8 @@ Return valid JSON only:
 
   async updateUserMatches(userId: string): Promise<void> {
     const recent = await prisma.opportunity.findMany({
-      where: {
-        createdAt: { gte: new Date(Date.now() - 45 * 86400000) },
-        OR: [{ deadline: null }, { deadline: { gte: new Date() } }],
-      },
-      select: { id: true },
-      take: 150,
-      orderBy: { createdAt: 'desc' },
+      where: { createdAt: { gte: new Date(Date.now() - 45 * 86400000) }, OR: [{ deadline: null }, { deadline: { gte: new Date() } }] },
+      select: { id: true }, take: 150, orderBy: { createdAt: 'desc' },
     });
     for (const opportunity of recent) {
       try { await this.generateMatch(userId, opportunity.id); await this.sleep(180); }
