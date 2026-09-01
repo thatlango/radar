@@ -1,0 +1,19 @@
+.tuku-auth-dialog{border:0;padding:0;background:transparent;max-width:none;max-height:none}
+.tuku-auth-dialog::backdrop{background:rgba(15,23,42,.72);backdrop-filter:blur(8px)}
+.tuku-auth-shell{width:min(1020px,calc(100vw - 28px));min-height:640px;display:grid;grid-template-columns:1.03fr .97fr;overflow:hidden;border-radius:28px;background:#fff;box-shadow:0 35px 110px rgba(15,23,42,.24)}
+.tuku-auth-story{position:relative;overflow:hidden;background:#0f172a;color:#fff;padding:46px;display:flex;flex-direction:column;justify-content:space-between}
+.tuku-auth-story:before{content:"";position:absolute;width:380px;height:380px;border-radius:50%;border:54px solid rgba(14,165,233,.11);right:-130px;top:70px}
+.tuku-auth-story>div{position:relative;z-index:1}.tuku-auth-brand{width:46px;height:46px;border-radius:14px;background:#fff;color:#0f172a;display:grid;place-items:center;font-weight:900;margin-bottom:58px}
+.tuku-auth-kicker{font-size:10px;font-weight:800;letter-spacing:.14em;color:#0ea5e9}.tuku-auth-story .tuku-auth-kicker{color:#7dd3fc}
+.tuku-auth-story h2{font-size:46px;line-height:1.02;letter-spacing:-.045em;margin:13px 0 20px;max-width:470px}.tuku-auth-story p{max-width:460px;line-height:1.7;color:#cbd5e1}
+.tuku-auth-points{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.tuku-auth-points span{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);border-radius:13px;padding:12px;font-size:11px;font-weight:700;color:#e2e8f0}
+.tuku-auth-panel{position:relative;display:flex;flex-direction:column;justify-content:center;padding:46px 52px;background:#fff}.tuku-auth-panel>h2{font-size:34px;letter-spacing:-.035em;margin:8px 0}.tuku-auth-panel>p{color:#64748b;line-height:1.55;margin:0 0 23px}
+.tuku-auth-close{position:absolute;right:17px;top:16px;border:0;background:#f1f5f9;border-radius:50%;width:36px;height:36px;font-size:22px;color:#475569;cursor:pointer}
+.tuku-auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin-bottom:25px}.tuku-auth-tabs button{border:0;background:transparent;border-radius:9px;padding:10px;font-weight:750;color:#64748b;cursor:pointer}.tuku-auth-tabs button.active{background:#fff;color:#0f172a;box-shadow:0 3px 12px rgba(15,23,42,.08)}
+.tuku-auth-form{display:grid;gap:14px}.tuku-auth-form label{display:grid;gap:6px;font-size:12px;font-weight:700;color:#334155}.tuku-auth-form label>span{display:flex;justify-content:space-between;align-items:center}.tuku-auth-form input{height:48px;border:1px solid #cbd5e1;border-radius:12px;padding:0 13px;font:inherit;outline:none}.tuku-auth-form input:focus{border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,.12)}
+#tukuAuthForgot{border:0;background:transparent;color:#0284c7;font-size:11px;font-weight:750;cursor:pointer}.tuku-auth-feedback{min-height:18px;color:#b91c1c;font-size:12px;line-height:1.5}
+.tuku-auth-submit{min-height:48px;width:100%;border:0;border-radius:12px;background:#0f172a;color:#fff;font-weight:800;cursor:pointer}.tuku-auth-submit:disabled{opacity:.55;cursor:wait}
+.tuku-auth-security{margin-top:18px;padding-top:17px;border-top:1px solid #e2e8f0;color:#64748b;font-size:11px;line-height:1.55}
+.tuku-reset-card{width:min(470px,calc(100vw - 28px));min-height:auto;border-radius:24px;box-shadow:0 30px 100px rgba(15,23,42,.24)}.tuku-reset-card>h2{margin-bottom:22px}
+@media(max-width:760px){.tuku-auth-shell{display:block;width:min(520px,calc(100vw - 18px));min-height:0}.tuku-auth-story{display:none}.tuku-auth-panel{padding:44px 25px 30px}}
+@media(max-width:480px){.tuku-auth-shell{width:100vw;min-height:100vh;border-radius:0}.tuku-auth-panel{min-height:100vh;padding:55px 20px 28px}.tuku-reset-card{width:100vw;border-radius:0}}
