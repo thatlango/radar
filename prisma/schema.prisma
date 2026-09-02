@@ -54,6 +54,7 @@ model User {
   @@index([isPro])
 }
 
+
 model CapabilityProfile {
   id                    String   @id @default(uuid())
   userId                String   @unique
@@ -432,6 +433,7 @@ model ScraperSource {
   @@index([active])
   @@index([type])
 }
+
 
 model ScrapeRun {
   id              String    @id @default(uuid())

@@ -48,7 +48,24 @@ services:
         condition: service_healthy
     healthcheck:
       disable: true
-    networks: [radar-internal]
+    networks:
+      radar-internal: {}
+      tuku-edge: {}
+
+  worker:
+    image: tuku/radar:ovh
+    container_name: radar-worker
+    restart: unless-stopped
+    command: ["./node_modules/.bin/tsx", "workers/worker.ts"]
+    env_file: /opt/tuku/secrets/radar.env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      radar-internal: {}
+      tuku-edge: {}
 
 volumes:
   radar-db-data:

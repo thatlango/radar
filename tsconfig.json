@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "ai/matching.ts",
+    "alerts/**/*.ts",
+    "scrapers/**/*.ts",
+    "scripts/**/*.ts",
+    "workers/**/*.ts"
+  ]
+}
