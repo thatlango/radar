@@ -14,6 +14,7 @@ ENV NODE_ENV=production PORT=3000
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY package.json ./package.json
+COPY tsconfig.json ./tsconfig.json
 COPY prisma ./prisma
 COPY server ./server
 COPY public ./public
@@ -21,6 +22,7 @@ COPY alerts ./alerts
 COPY ai ./ai
 COPY scrapers ./scrapers
 COPY scripts ./scripts
+COPY workers ./workers
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
