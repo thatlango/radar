@@ -1,0 +1,99 @@
+/* Radar · Tuku UI/UX reference sprint
+   Discovery remains the dominant job: fit, deadline, value, evidence and next action first. */
+:root {
+  --touch-min: 44px;
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --focus-ring: rgba(14,165,233,.24);
+}
+
+:where(button,a,input,select,textarea,[role="button"]):focus-visible {
+  outline: 3px solid var(--focus-ring) !important;
+  outline-offset: 2px;
+}
+
+button,.button,.icon-button,.new-search,.nav-item { min-height: var(--touch-min); }
+.icon-button { min-width: var(--touch-min); width: var(--touch-min); height: var(--touch-min); }
+.search-wrap input,
+.filter-panel input,.filter-panel select,
+.settings-card input,.settings-card select,.settings-card textarea,
+.inline-form input,.inline-form select,.inline-form textarea,
+.workspace-canvas input,.workspace-canvas select,.workspace-canvas textarea,
+.chat-form textarea { min-height: var(--touch-min); }
+
+.page-title-row { margin-bottom: 28px; }
+.page-title-row h1 { text-wrap: balance; }
+.page-title-row p { text-wrap: pretty; }
+
+/* Opportunity cards: stronger F-pattern and less metadata noise. */
+.opportunity-card { padding: 18px; border-radius: var(--radius-card); }
+.opportunity-card h3 { font-size: 16px; line-height: 1.35; }
+.opportunity-card .org { font-size: 12px; }
+.opportunity-card .score { min-width: 58px; height: 40px; font-size: 13px; }
+.opportunity-card .meta-row { margin-top: 14px; gap: 7px; }
+.opportunity-card .tag { padding: 6px 9px; font-size: 10px; }
+.opportunity-card .card-description { font-size: 12px; line-height: 1.55; -webkit-line-clamp: 2; }
+
+/* Filtering is supportive, not dominant. */
+.filter-panel { border-radius: var(--radius-card); }
+.filter-panel>label { margin-bottom: 14px; }
+.filter-note { font-size: 11px; }
+
+.detail-panel,.workspace-list-panel,.settings-card,.workspace-header-card,.workspace-section,.analytics-detail,.inline-form {
+  border-radius: var(--radius-card);
+}
+
+/* State completeness hooks for app.js and server responses. */
+[data-state="loading"], [data-state="empty"], [data-state="error"], [data-state="offline"], [data-state="stale"], [data-state="success"] {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 18px;
+}
+[data-state="error"] { background: var(--danger-soft); color: var(--danger); }
+[data-state="offline"] { background: #eff6ff; color: #1d4ed8; }
+[data-state="stale"] { background: var(--warn-soft); color: var(--warn); }
+[data-state="success"] { background: var(--success-soft); color: var(--success); }
+[data-state="loading"] {
+  min-height: 96px;
+  background: linear-gradient(100deg,#fff 10%,#eef2f6 35%,#fff 60%);
+  background-size: 220% 100%;
+  animation: radar-shimmer 1.45s linear infinite;
+}
+@keyframes radar-shimmer { to { background-position:-220% 0; } }
+
+@media (max-width: 1180px) {
+  .discovery-grid { grid-template-columns: 220px minmax(0,1fr); }
+  .detail-panel { grid-column: 1 / -1; position: static; min-height: auto; max-height: none; }
+}
+
+@media (max-width: 820px) {
+  .content { padding-inline: 16px; }
+  .page-title-row { gap: 18px; }
+  .discovery-grid { grid-template-columns: 1fr; }
+  .filter-panel { position: static; order: 0; padding: 16px; }
+  .feed-panel { order: 1; }
+  .detail-panel { order: 2; }
+  .filter-panel > label { display: none; }
+  .filter-panel > .check-row { display: none !important; }
+  .filter-panel .panel-heading { margin-bottom: 0; }
+  .filter-panel .filter-note { display: none; }
+  .filter-panel:focus-within > label,
+  .filter-panel:focus-within > .check-row { display: grid; }
+  .filter-panel:focus-within > .check-row { display: flex !important; }
+  .filter-panel:focus-within .panel-heading { margin-bottom: 16px; }
+  .filter-panel:focus-within .filter-note { display: block; }
+  .opportunity-card { padding: 16px; }
+}
+
+@media (max-width: 640px) {
+  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .page-title-row { flex-direction: column; }
+  .hero-actions { width: 100%; display: flex; justify-content: space-between; }
+  .workspace-layout { grid-template-columns: 1fr; }
+  .workspace-list-panel { position: static; max-height: none; }
+  .detail-actions .button,.form-actions .button { flex: 1 1 140px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+}
