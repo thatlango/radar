@@ -1,0 +1,32 @@
+name: Apply validated Radar mobile readiness
+
+on:
+  push:
+    branches:
+      - mobile/responsiveness-2026-09-02
+
+permissions:
+  contents: write
+
+jobs:
+  apply-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mobile/responsiveness-2026-09-02
+          fetch-depth: 0
+      - name: Apply exact validated production patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Tuku Mobile Readiness"
+          git config user.email "mobile@tukutuku.org"
+          curl --fail --silent --show-error --location https://radar.tukutuku.org/radar-mobile-a8d6c4f1.patch -o /tmp/radar-mobile.patch
+          git apply --index /tmp/radar-mobile.patch
+          git rm .github/workflows/mobile-apply.yml
+          TREE="$(git write-tree)"
+          echo "tree=$TREE"
+          test "$TREE" = "3b5979ee1272a72f79b16690f3b37685fe039703"
+          git commit -m "fix: make Radar mobile-first across public and app flows"
+          git push origin HEAD:mobile/responsiveness-2026-09-02
