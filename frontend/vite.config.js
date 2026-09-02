@@ -10,5 +10,12 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     target: 'es2020',
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/radar-app.js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: (assetInfo) => assetInfo.name?.endsWith('.css') ? 'assets/radar-app.css' : 'assets/[name]-[hash][extname]',
+      },
+    },
   },
 });
