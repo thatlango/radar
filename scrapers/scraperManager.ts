@@ -7,6 +7,14 @@ import { RssFeedScraper } from './RssFeedScraper';
 import { PublicPageScraper } from './PublicPageScraper';
 import { WorldBankScraper } from './WorldBankScraper';
 import { UgandaGppScraper } from './UgandaGppScraper';
+import { EuFundingScraper } from './EuFundingScraper';
+import { GrantsGovScraper } from './GrantsGovScraper';
+import { UnPartnerScraper } from './UnPartnerScraper';
+import { BrighterMondayScraper } from './BrighterMondayScraper';
+import { ImpactpoolScraper } from './ImpactpoolScraper';
+import { EuraxessScraper } from './EuraxessScraper';
+import { IdrcScraper } from './IdrcScraper';
+import { GrandChallengesScraper } from './GrandChallengesScraper';
 import { RADAR_SOURCE_CATALOG } from './scanProfiles';
 
 const prisma = new PrismaClient();
@@ -22,7 +30,7 @@ export class ScraperManager {
 
     for (const definition of RADAR_SOURCE_CATALOG) {
       const adapter = definition.adapter;
-      const active = adapter === 'rss' || adapter === 'page' || adapter === 'afdb' || adapter === 'worldbank' || adapter === 'ugandagpp'
+      const active = ['rss','page','afdb','worldbank','ugandagpp','eufunding','grantsgov','unpartner','brightermonday','impactpool','euraxess','idrc','grandchallenges'].includes(adapter)
         ? true
         : adapter === 'linkedin'
           ? linkedInAvailable
@@ -130,6 +138,14 @@ export class ScraperManager {
     if (adapter === 'search') return WebDiscoveryScraper;
     if (adapter === 'worldbank') return WorldBankScraper;
     if (adapter === 'ugandagpp') return UgandaGppScraper;
+    if (adapter === 'eufunding') return EuFundingScraper;
+    if (adapter === 'grantsgov') return GrantsGovScraper;
+    if (adapter === 'unpartner') return UnPartnerScraper;
+    if (adapter === 'brightermonday') return BrighterMondayScraper;
+    if (adapter === 'impactpool') return ImpactpoolScraper;
+    if (adapter === 'euraxess') return EuraxessScraper;
+    if (adapter === 'idrc') return IdrcScraper;
+    if (adapter === 'grandchallenges') return GrandChallengesScraper;
     if (adapter === 'linkedin') return LinkedInScraper;
     if (adapter === 'afdb') return AfDBScraper;
     const normalized = String(source?.name || '').toLowerCase().replace(/\s+/g, '');

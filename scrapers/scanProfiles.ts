@@ -13,7 +13,7 @@ export type RadarSourceDefinition = {
   name: string;
   domain: string;
   discovery: 'primary' | 'secondary';
-  adapter: 'rss' | 'page' | 'search' | 'linkedin' | 'afdb' | 'worldbank' | 'ugandagpp';
+  adapter: 'rss' | 'page' | 'search' | 'linkedin' | 'afdb' | 'worldbank' | 'ugandagpp' | 'eufunding' | 'grantsgov' | 'unpartner' | 'brightermonday' | 'impactpool' | 'euraxess' | 'idrc' | 'grandchallenges';
   trust: 'official' | 'curated' | 'secondary';
   baseUrl?: string;
   feedUrl?: string;
@@ -39,6 +39,16 @@ export const RADAR_SOURCE_CATALOG: RadarSourceDefinition[] = [
   { name: 'Terra Viva Grants', domain: 'terravivagrants.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.terravivagrants.org/', feedUrl: 'https://www.terravivagrants.org/feed/', defaultType: 'grant', frequency: 'daily' },
   { name: 'Opportunities for Youth', domain: 'opportunitiesforyouth.org', discovery: 'secondary', adapter: 'rss', trust: 'curated', baseUrl: 'https://opportunitiesforyouth.org/', feedUrl: 'https://opportunitiesforyouth.org/feed/', frequency: 'daily' },
 
+  // Structured funding, partnership and specialist opportunity sources.
+  { name: 'EU Funding & Tenders — Grants & Calls', domain: 'ec.europa.eu', discovery: 'primary', adapter: 'eufunding', trust: 'official', baseUrl: 'https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-search', defaultType: 'grant', organization: 'European Commission', frequency: 'daily' },
+  { name: 'Grants.gov', domain: 'grants.gov', discovery: 'primary', adapter: 'grantsgov', trust: 'official', baseUrl: 'https://www.grants.gov/search-grants', defaultType: 'grant', organization: 'U.S. Federal Government', frequency: 'daily' },
+  { name: 'UN Partner Portal', domain: 'unpartnerportal.org', discovery: 'primary', adapter: 'unpartner', trust: 'official', baseUrl: 'https://www.unpartnerportal.org/landing/opportunities/', defaultType: 'grant', organization: 'United Nations', frequency: 'daily' },
+  { name: 'BrighterMonday Uganda', domain: 'brightermonday.co.ug', discovery: 'primary', adapter: 'brightermonday', trust: 'curated', baseUrl: 'https://www.brightermonday.co.ug/jobs', defaultType: 'job', defaultCountry: 'Uganda', frequency: 'hourly' },
+  { name: 'Impactpool', domain: 'impactpool.org', discovery: 'primary', adapter: 'impactpool', trust: 'curated', baseUrl: 'https://www.impactpool.org/search', defaultType: 'job', frequency: 'hourly' },
+  { name: 'EURAXESS Jobs & Research Opportunities', domain: 'euraxess.ec.europa.eu', discovery: 'primary', adapter: 'euraxess', trust: 'official', baseUrl: 'https://euraxess.ec.europa.eu/jobs/search', defaultType: 'job', frequency: 'hourly' },
+  { name: 'IDRC Funding', domain: 'idrc-crdi.ca', discovery: 'primary', adapter: 'idrc', trust: 'official', baseUrl: 'https://idrc-crdi.ca/en/funding', defaultType: 'grant', organization: 'International Development Research Centre (IDRC)', frequency: 'daily' },
+  { name: 'Grand Challenges', domain: 'grandchallenges.org', discovery: 'primary', adapter: 'grandchallenges', trust: 'official', baseUrl: 'https://www.grandchallenges.org/grant-opportunities', defaultType: 'grant', organization: 'Grand Challenges', frequency: 'daily' },
+
   // Public/official listing pages. One lightweight fetch per page; no login or private portal scraping.
   { name: 'Global South Opportunities', domain: 'globalsouthopportunities.com', discovery: 'primary', adapter: 'search', trust: 'curated', baseUrl: 'https://www.globalsouthopportunities.com/', frequency: 'hourly' },
   { name: 'UNDP Procurement Notices', domain: 'procurement-notices.undp.org', discovery: 'primary', adapter: 'page', trust: 'official', baseUrl: 'https://procurement-notices.undp.org/', pages: ['https://procurement-notices.undp.org/'], defaultType: 'tender', organization: 'UNDP', frequency: 'daily' },
@@ -60,10 +70,13 @@ export const RADAR_SOURCE_CATALOG: RadarSourceDefinition[] = [
 
   // Search-provider expansion. These become independently monitored when Brave/Serper is configured.
   { name: 'ReliefWeb', domain: 'reliefweb.int', discovery: 'primary', adapter: 'search', trust: 'curated' },
+  { name: 'ProFellow', domain: 'profellow.com', discovery: 'secondary', adapter: 'search', trust: 'curated', baseUrl: 'https://www.profellow.com/fellowships/' },
+  { name: 'AECF Funding Opportunities', domain: 'aecfafrica.org', discovery: 'primary', adapter: 'search', trust: 'official', baseUrl: 'https://www.aecfafrica.org/im-looking-to/see-aecfs-funding-opportunities/', defaultType: 'grant' },
+  { name: 'GSMA Innovation Fund', domain: 'gsma.com', discovery: 'primary', adapter: 'search', trust: 'official', baseUrl: 'https://www.gsma.com/solutions-and-impact/connectivity-for-good/mobile-for-development/gsma-innovation-fund/', defaultType: 'grant' },
+  { name: 'UNjobs', domain: 'unjobs.org', discovery: 'primary', adapter: 'search', trust: 'curated', baseUrl: 'https://unjobs.org/' },
   { name: 'Devex', domain: 'devex.com', discovery: 'primary', adapter: 'search', trust: 'curated' },
   { name: 'DevNetJobs', domain: 'devnetjobs.org', discovery: 'secondary', adapter: 'search', trust: 'curated' },
   { name: 'DevelopmentAid', domain: 'developmentaid.org', discovery: 'secondary', adapter: 'search', trust: 'curated' },
-  { name: 'Impactpool', domain: 'impactpool.org', discovery: 'primary', adapter: 'search', trust: 'curated' },
   { name: 'Assortis', domain: 'assortis.com', discovery: 'secondary', adapter: 'search', trust: 'curated' },
   { name: 'dgMarket', domain: 'dgmarket.com', discovery: 'secondary', adapter: 'search', trust: 'curated' },
   { name: 'GlobalTenders', domain: 'globaltenders.com', discovery: 'secondary', adapter: 'search', trust: 'curated' },
@@ -141,6 +154,26 @@ export const SCAN_PROFILES: ScanProfile[] = [
     ],
     geographies: ['Remote', 'Africa', 'East Africa', 'Uganda'],
     minDaysToDeadline: 5,
+    priorityDomains: RADAR_SOURCE_CATALOG.map((source) => source.domain),
+  },
+  {
+    id: 'funding-grants',
+    name: 'Grants, funding & challenge capital',
+    description: 'Grants, calls for proposals, innovation funds, challenge awards, research funding and institutional partnership opportunities.',
+    opportunityTypes: ['grant'],
+    keywords: ['grant', 'funding', 'call for proposals', 'challenge fund', 'innovation fund', 'research funding', 'prize', 'award', 'partnership call', 'accelerator funding', 'seed funding', 'open call'],
+    geographies: ['Uganda', 'East Africa', 'Africa', 'Global South', 'Global'],
+    minDaysToDeadline: 7,
+    priorityDomains: RADAR_SOURCE_CATALOG.map((source) => source.domain),
+  },
+  {
+    id: 'fellowships-growth',
+    name: 'Fellowships & professional growth',
+    description: 'Funded fellowships, leadership programmes, research fellowships, scholarships, residencies, PhD/postdoc opportunities and professional exchanges.',
+    opportunityTypes: ['fellowship'],
+    keywords: ['fellowship', 'leadership programme', 'leadership program', 'research fellowship', 'scholarship', 'residency', 'exchange programme', 'PhD', 'doctoral', 'postdoc', 'professional fellowship', 'travel award'],
+    geographies: ['Uganda', 'East Africa', 'Africa', 'Global South', 'Global'],
+    minDaysToDeadline: 7,
     priorityDomains: RADAR_SOURCE_CATALOG.map((source) => source.domain),
   },
   {
