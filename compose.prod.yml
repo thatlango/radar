@@ -3,15 +3,16 @@ services:
     image: postgres:17-alpine
     container_name: radar-db
     restart: unless-stopped
+    # Database credentials are injected into the container from this file.
+    # Do not duplicate them with Compose-time ${...} interpolation: a normal
+    # `docker compose up` must never turn an unset shell variable into a blank
+    # POSTGRES_PASSWORD and recreate the database container with bad config.
     env_file: /opt/tuku/secrets/radar.env
-    environment:
-      POSTGRES_USER: ${RADAR_DB_USER:-radar}
-      POSTGRES_PASSWORD: ${RADAR_DB_PASSWORD}
-      POSTGRES_DB: ${RADAR_DB_NAME:-radar}
     volumes:
       - radar-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${RADAR_DB_USER:-radar} -d ${RADAR_DB_NAME:-radar}"]
+      # $$ defers expansion to the container, where radar.env is available.
+      test: ["CMD-SHELL", "pg_isready -U \"$${RADAR_DB_USER:-radar}\" -d \"$${RADAR_DB_NAME:-radar}\""]
       interval: 10s
       timeout: 5s
       retries: 10
