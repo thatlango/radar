@@ -46,6 +46,19 @@ export class AlertSystem {
       catch (error) { console.error('[Radar] daily briefing tick failed', error); }
     });
 
+    // Keep freshness state truthful even when a source stops publishing a deadline.
+    cron.schedule('35 * * * *', async () => {
+      try {
+        const now = new Date();
+        const staleBefore = new Date(Date.now() - 72 * 3600000);
+        const [expired, stale] = await Promise.all([
+          prisma.opportunity.updateMany({ where: { deadline: { lt: now }, sourceStatus: { not: 'expired' } }, data: { sourceStatus: 'expired', verificationStatus: 'expired', closedAt: now } }),
+          prisma.opportunity.updateMany({ where: { deadline: null, lastVerifiedAt: { lt: staleBefore }, sourceStatus: 'live' }, data: { sourceStatus: 'stale', verificationStatus: 'needs_review' } }),
+        ]);
+        if (expired.count || stale.count) console.log(`[Radar] freshness reconciled: ${expired.count} expired, ${stale.count} stale`);
+      } catch (error) { console.error('[Radar] freshness reconciliation failed', error); }
+    });
+
     // Preserve weekly and instant alert modes for existing accounts.
     cron.schedule('20 * * * *', async () => {
       try { await this.processInstantAlerts(); }
@@ -203,19 +216,36 @@ export class AlertSystem {
     return Math.min(100, score);
   }
 
+  private maskRecipient(value: string): string {
+    const raw = String(value || '');
+    if (raw.includes('@')) { const [local, domain] = raw.split('@'); return `${local.slice(0,2)}***@${domain}`; }
+    return raw.length > 6 ? `${raw.slice(0,3)}***${raw.slice(-3)}` : '***';
+  }
+
+  private async trackedDelivery(user: any, kind: string, channel: string, recipient: string, send: () => Promise<any>): Promise<void> {
+    const event = await prisma.deliveryEvent.create({ data: { userId: user.id, kind, channel, status: 'sending', recipientMasked: this.maskRecipient(recipient), attemptCount: 1 } });
+    try {
+      const result: any = await send();
+      await prisma.deliveryEvent.update({ where: { id: event.id }, data: { status: 'sent', sentAt: new Date(), providerMessageId: String(result?.messageId || result?.sid || '').slice(0, 240) || null } });
+    } catch (error: any) {
+      await prisma.deliveryEvent.update({ where: { id: event.id }, data: { status: 'failed', lastError: String(error?.message || error).slice(0, 8000) } }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async deliver(user: any, opportunities: AlertOpportunity[], frequency: string): Promise<void> {
     const prefs = this.prefs(user);
     const tasks: Promise<any>[] = [];
-    if (prefs.emailBrief !== false && user.email) tasks.push(this.sendEmail(user, opportunities, frequency));
-    if (prefs.whatsappBrief === true && user.phone) tasks.push(this.sendWhatsApp(user, opportunities));
-    if (!tasks.length && user.email) tasks.push(this.sendEmail(user, opportunities, frequency));
+    if (prefs.emailBrief !== false && user.email) tasks.push(this.trackedDelivery(user, `${frequency}_brief`, 'email', user.email, () => this.sendEmail(user, opportunities, frequency)));
+    if (prefs.whatsappBrief === true && user.phone) tasks.push(this.trackedDelivery(user, `${frequency}_brief`, 'whatsapp', user.phone, () => this.sendWhatsApp(user, opportunities)));
+    if (!tasks.length && user.email) tasks.push(this.trackedDelivery(user, `${frequency}_brief`, 'email', user.email, () => this.sendEmail(user, opportunities, frequency)));
     await Promise.all(tasks);
   }
 
-  private async sendEmail(user: any, opportunities: AlertOpportunity[], frequency: string): Promise<void> {
+  private async sendEmail(user: any, opportunities: AlertOpportunity[], frequency: string): Promise<any> {
     if (!process.env.SMTP_HOST) throw new Error('SMTP is not configured.');
     const subject = frequency === 'instant' ? 'Radar: a new strong-fit opportunity' : `Radar ${frequency === 'weekly' ? 'weekly' : 'daily'} brief — ${opportunities.length} matches`;
-    await emailTransporter.sendMail({
+    return emailTransporter.sendMail({
       from: process.env.RADAR_ALERT_FROM || '"Radar by Tuku-Tuku" <radar@tukutuku.org>',
       to: user.email,
       subject,
@@ -223,7 +253,7 @@ export class AlertSystem {
     });
   }
 
-  private async sendWhatsApp(user: any, opportunities: AlertOpportunity[]): Promise<void> {
+  private async sendWhatsApp(user: any, opportunities: AlertOpportunity[]): Promise<any> {
     if (!twilioClient || !process.env.TWILIO_WHATSAPP_FROM) throw new Error('WhatsApp delivery is not configured.');
     const top = opportunities.slice(0, 5).map((opp, index) => {
       const score = opp.matchScore ? `${Math.round(opp.matchScore)}%` : 'fit';
@@ -231,7 +261,7 @@ export class AlertSystem {
       return `${index + 1}. ${opp.title} — ${opp.organization}\n${score} · ${opp.country} · ${due}\n${opp.sourceUrl}`;
     }).join('\n\n');
     const body = `*Your Radar brief*\n${opportunities.length} new opportunities matched what you are looking for.\n\n${top}\n\nOpen Radar for fit notes and next steps: https://radar.tukutuku.org/app`;
-    await twilioClient.messages.create({
+    return twilioClient.messages.create({
       body: body.slice(0, 3500),
       from: `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`,
       to: `whatsapp:${this.normalizePhone(user.phone)}`,

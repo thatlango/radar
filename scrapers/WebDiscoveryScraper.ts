@@ -39,19 +39,23 @@ export class WebDiscoveryScraper extends BaseScraper {
       return buildDiscoveryQueries(profile, intent, user.parsedSkills || []).slice(0, 2);
     });
 
-    const baseQueries = profiles.flatMap((profile) => buildDiscoveryQueries(profile).slice(0, 3));
+    const baseQueries = profiles.flatMap((profile) => buildDiscoveryQueries(profile).slice(0, 4));
     const allKeywords = [...new Set(profiles.flatMap((profile) => profile.keywords))];
-    const primaryDomains = RADAR_SOURCE_CATALOG.filter((s) => s.discovery === 'primary').map((s) => s.domain);
-    const mandatoryDomains = ['linkedin.com', 'opportunitydesk.org', 'globalsouthopportunities.com'];
-    const discoveryTerms = allKeywords.slice(0, 14).map((term) => `"${term}"`).join(' OR ');
-    const domainQueries = mandatoryDomains.map((domain) => `site:${domain} (${discoveryTerms}) (consultancy OR tender OR opportunity OR RFP OR EOI OR grant OR job)`);
+    const configuredDomains = Array.isArray(config.domains) ? config.domains.map((value: any) => String(value).trim().toLowerCase()).filter(Boolean) : [];
+    const primaryDomains = configuredDomains.length
+      ? configuredDomains
+      : RADAR_SOURCE_CATALOG.filter((s) => s.discovery === 'primary').map((s) => s.domain);
+    const mandatoryDomains = configuredDomains.length ? configuredDomains : ['linkedin.com', 'opportunitydesk.org', 'globalsouthopportunities.com'];
+    const discoveryTerms = allKeywords.slice(0, 16).map((term) => `"${term}"`).join(' OR ');
+    const domainQueries = mandatoryDomains.map((domain) => `site:${domain} (${discoveryTerms}) (consultancy OR consultant OR tender OR opportunity OR RFP OR EOI OR grant OR job OR fellowship)`);
     const sectorDomainQueries = primaryDomains
       .filter((domain) => !mandatoryDomains.includes(domain))
-      .slice(0, 14)
-      .map((domain) => `site:${domain} (${allKeywords.slice(0, 8).map((term) => `"${term}"`).join(' OR ')}) (consultancy OR tender OR RFP OR EOI OR "call for proposals")`);
+      .slice(0, 24)
+      .map((domain) => `site:${domain} (${allKeywords.slice(0, 10).map((term) => `"${term}"`).join(' OR ')}) (consultancy OR tender OR RFP OR EOI OR "call for proposals" OR grant OR job)`);
 
-    const maxQueries = Math.max(6, Math.min(36, Number(process.env.RADAR_DISCOVERY_MAX_QUERIES || 24)));
-    const queries = [...domainQueries, ...baseQueries, ...personalised, ...sectorDomainQueries]
+    const defaultMax = configuredDomains.length ? 8 : 32;
+    const maxQueries = Math.max(4, Math.min(48, Number(process.env.RADAR_DISCOVERY_MAX_QUERIES || defaultMax)));
+    const queries = [...domainQueries, ...(configuredDomains.length ? [] : baseQueries), ...(configuredDomains.length ? [] : personalised), ...sectorDomainQueries]
       .filter((value, index, self) => value && self.indexOf(value) === index)
       .slice(0, maxQueries);
 

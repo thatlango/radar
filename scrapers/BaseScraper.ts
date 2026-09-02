@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import crypto from 'node:crypto';
 
 const prisma = new PrismaClient();
 
@@ -40,6 +41,7 @@ export abstract class BaseScraper {
     if (!opportunity.organization?.trim()) return false;
     if (!opportunity.sourceUrl || !this.isValidUrl(opportunity.sourceUrl)) return false;
     if (!['job', 'fellowship', 'consultancy', 'grant', 'tender'].includes(opportunity.type)) return false;
+    if (opportunity.deadline && new Date(opportunity.deadline).getTime() < Date.now() - 86400000) return false;
     return true;
   }
 
@@ -47,13 +49,84 @@ export abstract class BaseScraper {
     try { new URL(url); return true; } catch { return false; }
   }
 
-  protected async deduplicate(opportunity: RawOpportunity): Promise<boolean> {
-    return (await prisma.opportunity.findUnique({ where: { sourceUrl: opportunity.sourceUrl } })) === null;
+  protected normalizeKeyPart(value: unknown): string {
+    return String(value || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+  }
+
+  protected canonicalKey(opportunity: RawOpportunity): string {
+    const ref = this.extractReferenceNumber(opportunity);
+    const deadline = opportunity.deadline ? new Date(opportunity.deadline).toISOString().slice(0, 10) : '';
+    const raw = [this.normalizeKeyPart(opportunity.organization), this.normalizeKeyPart(opportunity.title), deadline, this.normalizeKeyPart(ref)].join('|');
+    return crypto.createHash('sha256').update(raw).digest('hex');
+  }
+
+  protected extractReferenceNumber(opportunity: RawOpportunity): string | undefined {
+    const text = `${opportunity.title || ''} ${opportunity.description || ''} ${opportunity.requirements || ''}`;
+    const match = text.match(/(?:ref(?:erence)?|rfp|eoi|tender|procurement)\s*(?:no\.?|number|#|:|-)?\s*([A-Z0-9][A-Z0-9./_-]{3,})/i);
+    const candidate = match?.[1]?.trim();
+    return candidate && /\d/.test(candidate) ? candidate : undefined;
+  }
+
+  protected async persist(opportunity: RawOpportunity): Promise<boolean> {
+    const canonicalKey = this.canonicalKey(opportunity);
+    const sourceName = opportunity.source || this.constructor.name.replace('Scraper', '');
+    const now = new Date();
+    let row = await prisma.opportunity.findFirst({ where: { OR: [{ canonicalKey }, { sourceUrl: opportunity.sourceUrl }] } });
+    let inserted = false;
+    if (!row) {
+      row = await prisma.opportunity.create({
+        data: {
+          title: opportunity.title,
+          organization: opportunity.organization,
+          country: opportunity.country,
+          region: opportunity.region,
+          type: opportunity.type,
+          remote: opportunity.remote,
+          description: opportunity.description,
+          requirements: opportunity.requirements,
+          salary: opportunity.salary,
+          deadline: opportunity.deadline,
+          source: sourceName,
+          sourceUrl: opportunity.sourceUrl,
+          canonicalKey,
+          referenceNumber: this.extractReferenceNumber(opportunity),
+          discoveredAt: now,
+          lastVerifiedAt: now,
+          sourceStatus: 'live',
+          verificationStatus: 'verified',
+        },
+      });
+      inserted = true;
+    } else {
+      const richerDescription = String(opportunity.description || '').length > String(row.description || '').length ? opportunity.description : row.description;
+      const richerRequirements = String(opportunity.requirements || '').length > String(row.requirements || '').length ? opportunity.requirements : row.requirements;
+      row = await prisma.opportunity.update({
+        where: { id: row.id },
+        data: {
+          description: richerDescription,
+          requirements: richerRequirements,
+          type: opportunity.type || row.type,
+          deadline: opportunity.deadline || row.deadline,
+          remote: row.remote || opportunity.remote,
+          lastVerifiedAt: now,
+          sourceStatus: 'live',
+          verificationStatus: 'verified',
+          closedAt: null,
+        },
+      });
+    }
+    await prisma.opportunitySource.upsert({
+      where: { sourceUrl: opportunity.sourceUrl },
+      create: { opportunityId: row.id, sourceName, sourceUrl: opportunity.sourceUrl, sourceType: opportunity.type, lastVerifiedAt: now, status: 'live' },
+      update: { opportunityId: row.id, sourceName, sourceType: opportunity.type, lastVerifiedAt: now, status: 'live' },
+    });
+    return inserted;
   }
 
   async run(): Promise<{ success: boolean; scraped: number; inserted: number; duplicates: number; errors: number }> {
     const startTime = Date.now();
     const results = { success: false, scraped: 0, inserted: 0, duplicates: 0, errors: 0 };
+    const run = this.config.sourceId === 'test' ? null : await prisma.scrapeRun.create({ data: { sourceId: this.config.sourceId, status: 'running' } }).catch(() => null);
     try {
       const rawData = await this.fetchWithRetry();
       results.scraped = rawData.length;
@@ -61,9 +134,9 @@ export abstract class BaseScraper {
         try {
           const normalized = this.normalize(item);
           if (!this.validate(normalized)) { results.errors++; continue; }
-          if (!(await this.deduplicate(normalized))) { results.duplicates++; continue; }
-          await this.insert(normalized);
-          results.inserted++;
+          const inserted = await this.persist(normalized);
+          if (inserted) results.inserted++;
+          else results.duplicates++;
           await this.sleep(this.config.rateLimit!);
         } catch (error) {
           console.error(`[${this.constructor.name}] Error processing item:`, error);
@@ -72,11 +145,13 @@ export abstract class BaseScraper {
       }
       await this.updateSourceMetadata(results.inserted, results.errors === 0);
       results.success = true;
+      if (run) await prisma.scrapeRun.update({ where: { id: run.id }, data: { status: results.errors ? 'partial' : 'success', scraped: results.scraped, inserted: results.inserted, duplicates: results.duplicates, errors: results.errors, durationMs: Date.now() - startTime, completedAt: new Date() } }).catch(() => undefined);
       console.log(`[${this.constructor.name}] completed in ${((Date.now() - startTime) / 1000).toFixed(2)}s`, results);
       return results;
     } catch (error) {
       console.error(`[${this.constructor.name}] Fatal error:`, error);
       await this.logError(error);
+      if (run) await prisma.scrapeRun.update({ where: { id: run.id }, data: { status: 'failed', scraped: results.scraped, inserted: results.inserted, duplicates: results.duplicates, errors: Math.max(1, results.errors), durationMs: Date.now() - startTime, errorMessage: String((error as any)?.message || error).slice(0, 8000), completedAt: new Date() } }).catch(() => undefined);
       return results;
     }
   }
@@ -93,24 +168,6 @@ export abstract class BaseScraper {
     }
   }
 
-  protected async insert(opportunity: RawOpportunity): Promise<void> {
-    await prisma.opportunity.create({
-      data: {
-        title: opportunity.title,
-        organization: opportunity.organization,
-        country: opportunity.country,
-        region: opportunity.region,
-        type: opportunity.type,
-        remote: opportunity.remote,
-        description: opportunity.description,
-        requirements: opportunity.requirements,
-        salary: opportunity.salary,
-        deadline: opportunity.deadline,
-        source: opportunity.source || this.constructor.name.replace('Scraper', ''),
-        sourceUrl: opportunity.sourceUrl,
-      },
-    });
-  }
 
   protected async updateSourceMetadata(insertedCount: number, success: boolean): Promise<void> {
     // Test scrapers are not backed by a persistent source row.

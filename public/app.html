@@ -57,17 +57,22 @@
           <div id="statsGrid" class="stats-grid"></div>
           <div class="discovery-grid">
             <aside class="filter-panel">
-              <div class="panel-heading"><h2>Refine parameters</h2><button id="clearFilters" class="text-button">Reset</button></div>
-              <label>Category<select id="typeFilter"><option value="">All opportunities</option><option value="job">Jobs</option><option value="consultancy">Consulting</option><option value="tender">Tenders / RFPs</option><option value="grant">Grants</option><option value="fellowship">Fellowships</option><option value="internship">Internships</option></select></label>
-              <label>Country or region<input id="countryFilter" placeholder="Uganda, East Africa…" /></label>
-              <label>Minimum stated value<input id="valueFilter" type="number" min="0" step="1000" placeholder="0" /></label>
-              <label>Closing within<select id="deadlineFilter"><option value="">Any runway</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label>
-              <label class="check-row"><input id="verifiedFilter" type="checkbox" checked />Verified opportunities only</label>
-              <label class="check-row"><input id="remoteFilter" type="checkbox" />Remote-only focus</label>
-              <div class="filter-note">Your profile, deadline runway and past matching context are also used when signed in.</div>
+              <div class="panel-heading"><h2>Filters</h2><button id="clearFilters" class="text-button">Reset</button></div>
+              <label>Opportunity type<select id="typeFilter"><option value="">All opportunities</option><option value="job">Jobs</option><option value="consultancy">Consulting</option><option value="tender">Tenders / RFPs</option><option value="grant">Grants</option><option value="fellowship">Fellowships</option><option value="internship">Internships</option></select></label>
+              <label>Location<input id="countryFilter" placeholder="Uganda, East Africa…" /></label>
+              <label>Deadline<select id="deadlineFilter"><option value="">Any runway</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label>
+              <details class="more-filters">
+                <summary><span><strong>More filters</strong><small>Value, verification, remote</small></span><b>＋</b></summary>
+                <div class="more-filter-body">
+                  <label>Minimum stated value<input id="valueFilter" type="number" min="0" step="1000" placeholder="0" /></label>
+                  <label class="check-row"><input id="verifiedFilter" type="checkbox" checked />Verified only</label>
+                  <label class="check-row"><input id="remoteFilter" type="checkbox" />Remote only</label>
+                </div>
+              </details>
+              <div class="filter-note">Signed in? Radar also uses your profile and matching history automatically.</div>
             </aside>
             <section class="feed-panel">
-              <div class="section-heading"><div><h2>Best available opportunities</h2><p id="resultMeta">Loading current opportunities…</p></div><button id="refreshButton" class="button ghost">Refresh</button></div>
+              <div class="section-heading"><div><h2>Recommended opportunities</h2><p id="resultMeta">Loading current opportunities…</p></div><button id="refreshButton" class="button ghost">Refresh</button></div>
               <div id="activeFilters" class="active-filters"></div>
               <div id="opportunityList" class="opportunity-list"></div>
             </section>

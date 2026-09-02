@@ -206,9 +206,123 @@ async function embeddedRadarAuth({ mode, email, password, name }) {
   }
   return { verificationRequired: false, core: await exchangeRadarCode(returned.searchParams.get('code') || '', verifier) };
 }
+
+function cleanOpportunityText(value) {
+  return String(value || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function clipAtWord(value, max = 100) {
+  const text = cleanOpportunityText(value);
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max + 1);
+  const cut = Math.max(slice.lastIndexOf(' '), slice.lastIndexOf('–'), slice.lastIndexOf('-'));
+  return `${slice.slice(0, cut > max * .62 ? cut : max).replace(/[\s,;:–—-]+$/, '')}…`;
+}
+const RADAR_ACRONYMS = ['ICT','AI','AATL','PKI','MSME','SME','BDS','MEL','RFP','EOI','TOR','RFQ','UN','UNDP','UNICEF','UNIDO','UNOPS','IOM','ILO','IFAD','IFC','GIZ','NITA-U','UCC','PPDA','EAC','COMESA','IGAD','GSMA'];
+const RADAR_PROPER_TERMS = ['Uganda','Kenya','Rwanda','Tanzania','Ghana','Nigeria','Africa','WebTrust'];
+function sentenceCaseOpportunityTitle(value) {
+  let text = cleanOpportunityText(value);
+  const letters = text.replace(/[^A-Za-z]/g, '');
+  if (letters.length > 8 && (letters.match(/[A-Z]/g) || []).length / letters.length > .72) {
+    text = text.toLowerCase();
+    text = text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  for (const acronym of RADAR_ACRONYMS) {
+    const escaped = acronym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\-/g, '-');
+    text = text.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), acronym);
+  }
+  for (const term of RADAR_PROPER_TERMS) text = text.replace(new RegExp(`\\b${term}\\b`, 'gi'), term);
+  return text;
+}
+function compactOpportunityTitle(rawTitle) {
+  let title = cleanOpportunityText(rawTitle);
+  title = title
+    .replace(/\(\s*\d+(?:\.\d+)?\s*(?:KB|MB)\s*\)/gi, ' ')
+    .replace(/\b(?:Bid Expiry|Bid Closing|Closing Date|Submission Deadline|Deadline|Apply By)\s*[:\-–—]\s*.*$/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const marker = title.search(/(?:[,;|–—-]\s*)?(?:TERMS? OF REFERENCE|TOR\b|TENDER DOCUMENT|BID DOCUMENT|DOWNLOAD\b|ATTACHMENT\b|REQUEST FOR QUOTATION\b)/i);
+  if (marker > 32) title = title.slice(0, marker).trim();
+  title = title
+    .replace(/^[A-Z0-9][A-Z0-9._-]*(?:\/[A-Z0-9._-]+){2,}\s*[-:–—]?\s*/i, '')
+    .replace(/^\(?\s*(?:EOI|RFP|RFQ|TOR)\s*\)?\s*[-:–—]?\s*/i, '')
+    .replace(/^(?:expression of interest(?:\s*\([^)]*\))?\s*(?:for|to provide)?\s*)/i, '')
+    .replace(/^(?:request for (?:proposals?|expressions? of interest|quotations?)\s*(?:for)?\s*)/i, '')
+    .replace(/^(?:invitation (?:to tender|for bids?)\s*(?:for)?\s*)/i, '')
+    .replace(/^(?:terms? of reference\s*(?:for)?\s*)/i, '')
+    .replace(/^(?:consultancy services?\s*(?:for|to)?\s*)/i, '')
+    .replace(/^(?:procurement of\s*)/i, '')
+    .replace(/^for\s+/i, '')
+    .replace(/[\s,;:–—-]+$/, '')
+    .trim();
+  const halves = title.split(/\s+(?:\||—|–|;|,)\s+/).filter(Boolean);
+  if (halves.length > 1 && halves[0].length >= 24) {
+    const first = halves[0].toLowerCase();
+    const next = halves[1].toLowerCase();
+    const firstWords = first.split(/\s+/).filter((x) => x.length > 4).slice(0, 5);
+    if (firstWords.filter((word) => next.includes(word)).length >= 3) title = halves[0];
+  }
+  if (!title) title = cleanOpportunityText(rawTitle);
+  title = sentenceCaseOpportunityTitle(title)
+    .replace(/\bconsultancy services?\b/gi, 'consultancy')
+    .replace(/\band\b/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (title.length > 72) {
+    const forIndex = title.toLowerCase().indexOf(' for ', 28);
+    if (forIndex > 28 && forIndex < 78) {
+      const lead = title.slice(0, forIndex).trim();
+      const generic = /^(?:consultancy|consultancy services|services|procurement|supply|works|goods|assignment)$/i.test(lead);
+      if (!generic && lead.split(/\s+/).length >= 4) title = lead;
+    }
+  }
+  return clipAtWord(title, 82);
+}
+function conciseOpportunitySummary(row, displayTitle) {
+  const candidates = [row.aiSummary, row.description, row.requirements].map(cleanOpportunityText).filter(Boolean);
+  for (let text of candidates) {
+    text = text
+      .replace(/\(\s*\d+(?:\.\d+)?\s*(?:KB|MB)\s*\)/gi, ' ')
+      .replace(/\b(?:TERMS? OF REFERENCE|TENDER DOCUMENT|BID DOCUMENT)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (displayTitle) {
+      const normalizedTitle = displayTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      text = text.replace(new RegExp(`^${normalizedTitle}[\\s.:–—-]*`, 'i'), '').trim();
+    }
+    text = text.replace(/^[A-Z0-9][A-Z0-9._-]*(?:\/[A-Z0-9._-]+){2,}\s*[-:–—]?\s*/i, '').trim();
+    const parts = text.split(/(?<=[.!?])\s+|\s+[•·]\s+/).map((x) => x.trim()).filter((x) => x.length >= 28);
+    const useful = parts.find((part) => !/^(?:reference|deadline|closing date|source|download|terms? of reference|expression of interest|request for proposal)\b/i.test(part));
+    if (useful) {
+      const titleWords = new Set(displayTitle.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 4));
+      const usefulWords = new Set(useful.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 4));
+      const overlap = titleWords.size ? [...titleWords].filter((word) => usefulWords.has(word)).length / titleWords.size : 0;
+      if (overlap < .7) return clipAtWord(sentenceCaseOpportunityTitle(useful), 210);
+    }
+  }
+  const org = cleanOpportunityText(row.organization || 'The organisation');
+  const type = String(row.type || '').toLowerCase();
+  const country = cleanOpportunityText(row.country || '');
+  if (type === 'consultancy') return `${org} is seeking consultants or firms for this assignment${country ? ` in ${country}` : ''}.`;
+  if (type === 'tender') return `${org} is inviting qualified bidders for this procurement${country ? ` in ${country}` : ''}.`;
+  if (type === 'grant') return `${org} is offering funding through this opportunity${country ? ` for ${country}` : ''}.`;
+  if (type === 'job') return `${org} is recruiting for this role${country ? ` in ${country}` : ''}.`;
+  if (type === 'fellowship') return `${org} is accepting applications for this programme${country ? ` in ${country}` : ''}.`;
+  return `${org} is accepting applications for this opportunity${country ? ` in ${country}` : ''}.`;
+}
+function opportunityPresentation(row) {
+  const title = compactOpportunityTitle(row.title);
+  return { title, officialTitle: cleanOpportunityText(row.title), summary: conciseOpportunitySummary(row, title) };
+}
+
 function opportunityView(row, extra = {}) {
+  const presentation = opportunityPresentation(row);
   return {
-    id: row.id, title: row.title, organization: row.organization, country: row.country, region: row.region,
+    id: row.id, title: presentation.title, officialTitle: presentation.officialTitle, organization: row.organization, country: row.country, region: row.region,
     type: row.type, remote: row.remote, description: row.description, requirements: row.requirements,
     compensation: row.salary, deadline: row.deadline, source: row.source, sourceUrl: row.sourceUrl,
     referenceNumber: row.referenceNumber, sector: row.sector, currency: row.currency, valueMin: row.valueMin, valueMax: row.valueMax,
@@ -216,7 +330,7 @@ function opportunityView(row, extra = {}) {
     publishedAt: row.publishedAt, discoveredAt: row.discoveredAt, lastVerifiedAt: row.lastVerifiedAt, sourceStatus: row.sourceStatus,
     verificationStatus: row.verificationStatus, sourceCount: row._count?.sources ?? (Array.isArray(row.sources) ? row.sources.length : 1),
     sources: Array.isArray(row.sources) ? row.sources.map((source) => ({ name: source.sourceName, url: source.sourceUrl, status: source.status, lastVerifiedAt: source.lastVerifiedAt })) : undefined,
-    summary: row.aiSummary, keywords: row.aiKeywords, qualityScore: row.qualityScore, createdAt: row.createdAt,
+    summary: presentation.summary, aiSummary: row.aiSummary, keywords: row.aiKeywords, qualityScore: row.qualityScore, createdAt: row.createdAt,
     ...extra,
   };
 }
@@ -522,8 +636,15 @@ app.get('/api/opportunities', async (req, res, next) => {
       });
     });
     if (session) mapped.sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0) || Number(b.qualityScore || 0) - Number(a.qualityScore || 0));
-    const items = mapped.slice(0, take);
-    res.json({ items, pageInfo: { nextCursor: mapped.length > take ? items.at(-1)?.id || null : null, hasMore: mapped.length > take } });
+    const seenPresentation = new Set();
+    const uniqueMapped = mapped.filter((item) => {
+      const key = [item.title, item.organization, item.country, item.source].map((value) => cleanOpportunityText(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).join('|');
+      if (!key || seenPresentation.has(key)) return false;
+      seenPresentation.add(key);
+      return true;
+    });
+    const items = uniqueMapped.slice(0, take);
+    res.json({ items, pageInfo: { nextCursor: uniqueMapped.length > take ? items.at(-1)?.id || null : null, hasMore: uniqueMapped.length > take } });
   } catch (error) { next(error); }
 });
 app.get('/api/opportunities/:id', async (req, res) => {
@@ -720,12 +841,12 @@ app.post('/api/opportunities/:id/workspace', requireSession, async (req, res, ne
       const workspaceCount = await prisma.opportunityWorkspace.count({ where: { userId: req.radarSession.userId, status: { notIn: ['closed'] } } });
       await enforceLimit({ prisma, session: req.radarSession, metric: 'workspaces', resourceCount: workspaceCount });
       workspace = await prisma.$transaction(async (tx) => {
-        const created = await tx.opportunityWorkspace.create({ data: { userId: req.radarSession.userId, opportunityId: opportunity.id, name: String(req.body?.name || `${opportunity.title} — Application`).slice(0, 180), submissionDeadline: opportunity.deadline || null } });
+        const created = await tx.opportunityWorkspace.create({ data: { userId: req.radarSession.userId, opportunityId: opportunity.id, name: String(req.body?.name || `${compactOpportunityTitle(opportunity.title)} — Application`).slice(0, 180), submissionDeadline: opportunity.deadline || null } });
         await tx.workspaceDocument.createMany({ data: seededDocumentSpecs(opportunity.type).map(([title, kind]) => ({ workspaceId: created.id, title, kind, status: 'pending' })) });
         await tx.workspaceMember.create({ data: { workspaceId: created.id, userId: req.radarSession.userId, name: req.radarSession.user.name, email: req.radarSession.user.email, role: 'owner', status: 'accepted' } });
         return tx.opportunityWorkspace.findUnique({ where: { id: created.id }, include: { opportunity: true, documents: true, members: true, comments: true } });
       });
-      await createNotification(req.radarSession.userId, 'workspace_created', 'Application workspace created', `Radar created a preparation workspace for ${opportunity.title}.`, { opportunityId: opportunity.id, workspaceId: workspace.id });
+      await createNotification(req.radarSession.userId, 'workspace_created', 'Application workspace created', `Radar created a preparation workspace for ${compactOpportunityTitle(opportunity.title)}.`, { opportunityId: opportunity.id, workspaceId: workspace.id });
     }
     res.json(workspaceView({ ...workspace, progress: workspaceProgress(workspace.documents) }));
   } catch (error) { next(error); }
@@ -838,7 +959,7 @@ app.post('/api/workspaces/:id/finalize', requireSession, async (req, res, next) 
     const unresolved = workspace.documents.filter((d) => !['approved', 'complete'].includes(d.status));
     if (unresolved.length) return res.status(409).json({ error: { code: 'DOCUMENTS_NOT_READY', message: `${unresolved.length} required document(s) still need approval or completion.`, details: unresolved.map((d) => d.title) } });
     const updated = await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { status: 'ready', progress: 100 } });
-    await createNotification(req.radarSession.userId, 'workspace_ready', 'Application package ready', `${workspace.opportunity.title} is internally ready for submission. Radar has not submitted it.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
+    await createNotification(req.radarSession.userId, 'workspace_ready', 'Application package ready', `${compactOpportunityTitle(workspace.opportunity.title)} is internally ready for submission. Radar has not submitted it.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
     res.json(workspaceView(updated));
   } catch (error) { next(error); }
 });
@@ -853,7 +974,7 @@ app.post('/api/workspaces/:id/submit', requireSession, async (req, res, next) =>
       prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { status: 'submitted', progress: 100 } }),
       prisma.application.upsert({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId } }, update: { status: 'applied', appliedAt: new Date() }, create: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId, status: 'applied', appliedAt: new Date() } }),
     ]);
-    await createNotification(req.radarSession.userId, 'application_submitted', 'Submission recorded', `You confirmed submission of ${workspace.opportunity.title}.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
+    await createNotification(req.radarSession.userId, 'application_submitted', 'Submission recorded', `You confirmed submission of ${compactOpportunityTitle(workspace.opportunity.title)}.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
     res.json({ recorded: true, message: 'Submission recorded in Radar. This endpoint records your confirmation; it does not submit to the external opportunity portal.' });
   } catch (error) { next(error); }
 });
