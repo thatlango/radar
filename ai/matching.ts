@@ -152,10 +152,37 @@ export class AIMatchingEngine {
     return scores.gpt * 0.58 + scores.location * 0.15 + scores.behavior * 0.12 + scores.freshness * 0.15;
   }
 
+  async generateLightweightMatch(userId: string, opportunityId: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { parsedSkills: true, parsedIndustries: true, preferences: true },
+    });
+    const opportunity = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      select: { title: true, organization: true, type: true, description: true, requirements: true, country: true, remote: true, createdAt: true, deadline: true },
+    });
+    if (!user || !opportunity) return;
+
+    const preferences = user.preferences && typeof user.preferences === 'object' ? user.preferences as any : {};
+    const profileTerms = [...(user.parsedSkills || []), ...(user.parsedIndustries || [])];
+    const result = this.fallbackResult(profileTerms, preferences, opportunity);
+    const locationScore = this.calculateLocationScore(preferences, opportunity.country, opportunity.remote);
+    const freshnessScore = this.calculateFreshnessScore(opportunity.createdAt, opportunity.deadline);
+    const behaviorScore = await this.calculateBehavioralScore(userId, opportunity.type);
+    const finalRank = this.calculateFinalRank({ gpt: result.score, location: locationScore, behavior: behaviorScore, freshness: freshnessScore });
+    const evidence = { keySkillMatches: result.keySkillMatches, missingRequirements: result.missingRequirements, hardConstraints: result.hardConstraints, specialistNeeds: result.specialistNeeds, confidence: result.confidence };
+
+    await prisma.match.upsert({
+      where: { userId_opportunityId: { userId, opportunityId } },
+      update: { gptMatchScore: result.score, explanation: result.explanation, ...evidence, locationScore, behaviorScore, freshnessScore, finalRank },
+      create: { userId, opportunityId, gptMatchScore: result.score, explanation: result.explanation, ...evidence, locationScore, behaviorScore, freshnessScore, finalRank },
+    });
+  }
+
   async matchNewOpportunity(opportunityId: string): Promise<void> {
     const users = await prisma.user.findMany({ where: { OR: [{ resumeText: { not: null } }, { onboardingComplete: true }] }, select: { id: true } });
     for (const user of users) {
-      try { await this.generateMatch(user.id, opportunityId); await this.sleep(250); }
+      try { await this.generateLightweightMatch(user.id, opportunityId); }
       catch (error) { console.error(`[AIMatchingEngine] user ${user.id}:`, error); }
     }
   }
@@ -166,10 +193,9 @@ export class AIMatchingEngine {
       select: { id: true }, take: 150, orderBy: { createdAt: 'desc' },
     });
     for (const opportunity of recent) {
-      try { await this.generateMatch(userId, opportunity.id); await this.sleep(180); }
+      try { await this.generateLightweightMatch(userId, opportunity.id); }
       catch (error) { console.error(`[AIMatchingEngine] opportunity ${opportunity.id}:`, error); }
     }
   }
 
-  private sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 }
