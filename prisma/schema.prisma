@@ -46,10 +46,36 @@ model User {
   userDocuments        UserDocument[]
   notifications        Notification[]
   subscriptionUsage    SubscriptionUsage[]
+  deliveries           DeliveryEvent[]
+  capabilityProfile    CapabilityProfile?
 
   @@index([email])
   @@index([referralCode])
   @@index([isPro])
+}
+
+model CapabilityProfile {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  profileType           String   @default("individual")
+  legalName             String?
+  registrationNumber    String?
+  registrationCountry   String?
+  yearsOperating        Int?
+  turnoverBand          String?
+  sectors               String[] @default([])
+  countries             String[] @default([])
+  donorExperience       String[] @default([])
+  licences              String[] @default([])
+  referenceCount        Int      @default(0)
+  canRecruitSpecialists Boolean  @default(false)
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([profileType])
+  @@index([registrationCountry])
 }
 
 model RadarSession {
@@ -81,6 +107,22 @@ model Opportunity {
   deadline        DateTime?
   source          String
   sourceUrl       String    @unique
+  canonicalKey    String?
+  referenceNumber String?
+  sector          String?
+  currency        String?
+  valueMin        Float?
+  valueMax        Float?
+  contractDuration String?
+  submissionMethod String?
+  languages       String[]  @default([])
+  eligibilityCountries String[] @default([])
+  publishedAt     DateTime?
+  discoveredAt    DateTime  @default(now())
+  lastVerifiedAt  DateTime  @default(now())
+  closedAt        DateTime?
+  sourceStatus    String    @default("live")
+  verificationStatus String @default("verified")
   aiSummary       String?   @db.Text
   aiKeywords      String[]  @default([])
   qualityScore    Float     @default(0)
@@ -94,6 +136,7 @@ model Opportunity {
   interactions    Interaction[]
   savedBy         SavedOpportunity[]
   workspaces      OpportunityWorkspace[]
+  sources         OpportunitySource[]
 
   @@index([country])
   @@index([type])
@@ -101,6 +144,28 @@ model Opportunity {
   @@index([createdAt])
   @@index([deadline])
   @@index([qualityScore])
+  @@index([canonicalKey])
+  @@index([sourceStatus, lastVerifiedAt])
+  @@index([verificationStatus])
+  @@index([sector])
+  @@index([publishedAt])
+}
+
+model OpportunitySource {
+  id              String    @id @default(uuid())
+  opportunityId   String
+  sourceName      String
+  sourceUrl       String    @unique
+  sourceType      String?
+  discoveredAt    DateTime  @default(now())
+  lastVerifiedAt  DateTime  @default(now())
+  status          String    @default("live")
+  rawMetadata     Json?
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([opportunityId])
+  @@index([sourceName, status])
+  @@index([lastVerifiedAt])
 }
 
 model Match {
@@ -109,6 +174,11 @@ model Match {
   opportunityId      String
   gptMatchScore      Float
   explanation        String    @db.Text
+  keySkillMatches    String[]  @default([])
+  missingRequirements String[] @default([])
+  hardConstraints    String[]  @default([])
+  specialistNeeds    String[]  @default([])
+  confidence         Float     @default(0.5)
   locationScore      Float     @default(0)
   behaviorScore      Float     @default(0)
   userTypePreference Float     @default(0)
@@ -213,6 +283,9 @@ model WorkspaceDocument {
   content         String?   @db.Text
   generatedByAi   Boolean   @default(false)
   version         Int       @default(1)
+  checksum        String?
+  evidenceRefs    Json?
+  lastSavedByUserId String?
   metadata        Json?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -266,6 +339,10 @@ model UserDocument {
   mimeType        String?
   content         String?   @db.Text
   sourceType      String    @default("manual")
+  checksum        String?
+  verificationStatus String @default("unverified")
+  extractedClaims Json?
+  version         Int       @default(1)
   metadata        Json?
   expiresAt       DateTime?
   lastReviewedAt  DateTime?
@@ -351,8 +428,68 @@ model ScraperSource {
   totalScraped    Int       @default(0)
   config          Json?
   createdAt       DateTime  @default(now())
+  runs            ScrapeRun[]
   @@index([active])
   @@index([type])
+}
+
+model ScrapeRun {
+  id              String    @id @default(uuid())
+  sourceId        String
+  status          String    @default("running")
+  scraped         Int       @default(0)
+  inserted        Int       @default(0)
+  duplicates      Int       @default(0)
+  errors          Int       @default(0)
+  durationMs      Int?
+  errorMessage    String?   @db.Text
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  source          ScraperSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, startedAt])
+  @@index([status, startedAt])
+}
+
+model RadarJob {
+  id              String    @id @default(uuid())
+  type            String
+  status          String    @default("queued")
+  payload         Json
+  dedupeKey       String?   @unique
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(5)
+  runAt           DateTime  @default(now())
+  lockedAt        DateTime?
+  completedAt     DateTime?
+  lastError       String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@index([type, status])
+}
+
+model DeliveryEvent {
+  id                String    @id @default(uuid())
+  userId            String
+  kind              String
+  channel           String
+  status            String    @default("queued")
+  recipientMasked   String?
+  providerMessageId String?
+  attemptCount      Int       @default(0)
+  lastError         String?   @db.Text
+  metadata          Json?
+  scheduledFor      DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, channel])
 }
 
 model ApiKey {
