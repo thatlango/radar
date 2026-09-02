@@ -5,7 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY prisma ./prisma
-RUN npx prisma generate
+COPY frontend ./frontend
+COPY public ./public
+RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -17,7 +19,7 @@ COPY package.json ./package.json
 COPY tsconfig.json ./tsconfig.json
 COPY prisma ./prisma
 COPY server ./server
-COPY public ./public
+COPY --from=build /app/public ./public
 COPY alerts ./alerts
 COPY ai ./ai
 COPY scrapers ./scrapers
