@@ -10,13 +10,16 @@ interface MatchingResult {
   keySkillMatches: string[];
   missingRequirements: string[];
   overqualifications: string[];
+  hardConstraints: string[];
+  specialistNeeds: string[];
+  confidence: number;
 }
 
 export class AIMatchingEngine {
   async generateMatch(userId: string, opportunityId: string): Promise<void> {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { resumeText: true, parsedSkills: true, parsedIndustries: true, preferences: true },
+      select: { resumeText: true, parsedSkills: true, parsedIndustries: true, preferences: true, capabilityProfile: true },
     });
     const opportunity = await prisma.opportunity.findUnique({
       where: { id: opportunityId },
@@ -30,6 +33,7 @@ export class AIMatchingEngine {
       skills: user.parsedSkills || [],
       industries: user.parsedIndustries || [],
       preferences,
+      capability: user.capabilityProfile,
       opportunity,
     });
     const locationScore = this.calculateLocationScore(preferences, opportunity.country, opportunity.remote);
@@ -37,20 +41,21 @@ export class AIMatchingEngine {
     const behaviorScore = await this.calculateBehavioralScore(userId, opportunity.type);
     const finalRank = this.calculateFinalRank({ gpt: aiResult.score, location: locationScore, behavior: behaviorScore, freshness: freshnessScore });
 
+    const evidence = { keySkillMatches: aiResult.keySkillMatches, missingRequirements: aiResult.missingRequirements, hardConstraints: aiResult.hardConstraints, specialistNeeds: aiResult.specialistNeeds, confidence: aiResult.confidence };
     await prisma.match.upsert({
       where: { userId_opportunityId: { userId, opportunityId } },
-      update: { gptMatchScore: aiResult.score, explanation: aiResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
-      create: { userId, opportunityId, gptMatchScore: aiResult.score, explanation: aiResult.explanation, locationScore, behaviorScore, freshnessScore, finalRank },
+      update: { gptMatchScore: aiResult.score, explanation: aiResult.explanation, ...evidence, locationScore, behaviorScore, freshnessScore, finalRank },
+      create: { userId, opportunityId, gptMatchScore: aiResult.score, explanation: aiResult.explanation, ...evidence, locationScore, behaviorScore, freshnessScore, finalRank },
     });
   }
 
   private async calculateAIMatchScore(input: any): Promise<MatchingResult> {
-    const { resumeText, skills, industries, preferences, opportunity } = input;
+    const { resumeText, skills, industries, preferences, capability, opportunity } = input;
     if (!AI_KEY) return this.fallbackResult(skills, preferences, opportunity);
     const profileType = String(preferences.profileType || 'individual');
     const canRecruitSpecialists = preferences.canRecruitSpecialists === true;
     const whatLookingFor = String(preferences.whatLookingFor || '').trim();
-    const instruction = `Score opportunity fit from 0-100 and return JSON only with score, explanation, keySkillMatches, missingRequirements, overqualifications. Use only supplied facts. If the profile is a firm/both and can recruit specialists, do not reject an attractive opportunity merely because a sector specialist is not currently in-house: identify the specialist gap instead. Still penalize hard corporate eligibility that hiring cannot fix, such as mandatory local registration, audited turnover, licences, or required firm references.`;
+    const instruction = `Score opportunity fit from 0-100 and return JSON only with score, confidence (0-1), explanation, keySkillMatches, missingRequirements, overqualifications, hardConstraints, specialistNeeds. Use only supplied facts. If the profile is a firm/both and can recruit specialists, do not reject an attractive opportunity merely because a sector specialist is not currently in-house: identify the specialist gap instead. Still penalize hard corporate eligibility that hiring cannot fix, such as mandatory local registration, audited turnover, licences, or required firm references.`;
     const context = {
       profile: {
         profileType,
@@ -59,7 +64,7 @@ export class AIMatchingEngine {
         industries,
         canRecruitSpecialists,
         resumeText: String(resumeText || '').slice(0, 22000),
-        preferences,
+        preferences, capability,
       },
       opportunity,
     };
@@ -82,6 +87,9 @@ export class AIMatchingEngine {
         keySkillMatches: Array.isArray(result.keySkillMatches) ? result.keySkillMatches : [],
         missingRequirements: Array.isArray(result.missingRequirements) ? result.missingRequirements : [],
         overqualifications: Array.isArray(result.overqualifications) ? result.overqualifications : [],
+        hardConstraints: Array.isArray(result.hardConstraints) ? result.hardConstraints : [],
+        specialistNeeds: Array.isArray(result.specialistNeeds) ? result.specialistNeeds : [],
+        confidence: Math.min(1, Math.max(0, Number(result.confidence ?? 0.65))),
       };
     } catch (error) {
       console.error('[AIMatchingEngine] Tuku AI error:', error);
@@ -102,6 +110,9 @@ export class AIMatchingEngine {
       keySkillMatches: skillHits.slice(0, 10),
       missingRequirements: [],
       overqualifications: [],
+      hardConstraints: [],
+      specialistNeeds: [],
+      confidence: 0.45,
     };
   }
 
