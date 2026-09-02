@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   apply-validated-tree:
-    if: github.event.head_commit.message == 'chore: trigger validated source expansion'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
@@ -21,6 +20,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$(git log -1 --pretty=%s)" != "chore: retry validated source expansion" ]; then
+            echo "Not the trigger commit; nothing to do."
+            exit 0
+          fi
           curl -fsSL 'https://radar.tukutuku.org/source-expansion-b0a6faa80eb74b6a.patch' -o /tmp/radar-source.patch
           echo 'b0a6faa80eb74b6abd1102c48bab7b57ec14602f5fa13fd181d7a05dddb570b2  /tmp/radar-source.patch' | sha256sum -c -
           git apply --index /tmp/radar-source.patch
