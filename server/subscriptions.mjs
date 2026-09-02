@@ -1,37 +1,54 @@
+const TRIAL_DAYS = 30;
+const DEFAULT_TRIAL_ROLLOUT_AT = '2026-09-02T04:15:00.000Z';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 const STARTER = {
   code: 'starter',
   productCode: 'radar',
   name: 'Starter',
-  description: 'Perfect for exploring the platform.',
+  description: 'Keep discovering and tracking opportunities after your trial.',
   currency: 'USD',
   priceMinor: 0,
   interval: 'monthly',
   checkout: false,
-  features: ['Up to 50 searches/month', 'Basic AI drafting (10/mo)', '1 Workspace'],
-  limits: { searches: 50, aiDrafts: 10, workspaces: 1, collaboration: false },
+  features: [
+    'Unlimited opportunity discovery',
+    'Save and track applications',
+    '1 active Workspace',
+    '3 AI document drafts/month',
+    'Weekly Radar brief',
+  ],
+  limits: { searches: null, aiDrafts: 3, workspaces: 1, collaboration: false },
 };
 const PRO_MONTHLY = {
   code: 'radar-pro-monthly',
   productCode: 'radar',
   name: 'Professional',
-  description: 'For growing teams and serious professionals.',
+  description: 'For people actively turning opportunities into applications.',
   currency: 'USD',
-  priceMinor: 4900,
+  priceMinor: 1900,
   interval: 'monthly',
   checkout: true,
-  features: ['Unlimited searches', 'Unlimited AI drafting', 'Up to 10 Workspaces', 'Team collaboration tools', 'Priority support'],
-  limits: { searches: null, aiDrafts: null, workspaces: 10, collaboration: true },
+  features: [
+    'Unlimited opportunity discovery',
+    '60 AI document drafts/month',
+    'Up to 10 active Workspaces',
+    'Team collaboration tools',
+    'Advanced application preparation',
+    'Priority support',
+  ],
+  limits: { searches: null, aiDrafts: 60, workspaces: 10, collaboration: true },
 };
 const PRO_ANNUAL = {
   code: 'radar-pro-annual',
   productCode: 'radar',
   name: 'Professional Annual',
-  description: 'Professional billed annually at the design-equivalent $39/month.',
+  description: 'Professional billed annually at $15/month equivalent.',
   currency: 'USD',
-  priceMinor: 46800,
+  priceMinor: 18000,
   interval: 'annual',
   checkout: true,
-  equivalentMonthlyMinor: 3900,
+  equivalentMonthlyMinor: 1500,
   features: PRO_MONTHLY.features,
   limits: PRO_MONTHLY.limits,
 };
@@ -39,17 +56,46 @@ const ENTERPRISE = {
   code: 'enterprise',
   productCode: 'radar',
   name: 'Enterprise',
-  description: 'Custom solutions for large organizations.',
+  description: 'Custom capacity, governance and source integrations for organisations.',
   currency: 'USD',
   priceMinor: null,
   interval: 'custom',
   checkout: false,
-  features: ['Custom workspace capacity', 'Team collaboration', 'Organisation administration', 'Priority support'],
+  features: [
+    'Custom workspace capacity',
+    'Organisation-wide collaboration',
+    'Administration and access controls',
+    'Custom opportunity/source integrations',
+    'Priority support',
+  ],
   limits: { searches: null, aiDrafts: null, workspaces: null, collaboration: true },
 };
 
 export const RADAR_PLANS = [STARTER, PRO_MONTHLY, PRO_ANNUAL, ENTERPRISE];
 export const subscriptionEnforcementEnabled = () => ['1','true','yes','on'].includes(String(process.env.RADAR_SUBSCRIPTION_ENFORCEMENT_ENABLED || 'false').toLowerCase());
+
+function trialRolloutAt() {
+  const parsed = new Date(process.env.RADAR_TRIAL_ROLLOUT_AT || DEFAULT_TRIAL_ROLLOUT_AT);
+  return Number.isFinite(parsed.getTime()) ? parsed : new Date(DEFAULT_TRIAL_ROLLOUT_AT);
+}
+
+function activeRadarTrial(user, now = new Date()) {
+  if (!user?.createdAt) return null;
+  const startsAt = new Date(user.createdAt);
+  if (!Number.isFinite(startsAt.getTime()) || startsAt < trialRolloutAt()) return null;
+  const endsAt = new Date(startsAt.getTime() + TRIAL_DAYS * DAY_MS);
+  if (endsAt.getTime() <= now.getTime()) return null;
+  return {
+    productCode: 'radar',
+    planCode: PRO_MONTHLY.code,
+    entitlementStatus: 'active',
+    subscriptionStatus: 'trial',
+    sourceType: 'radar_30_day_trial',
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    trialDays: TRIAL_DAYS,
+  };
+}
 
 export async function coreSubscriptionCatalog(coreInternalUrl) {
   try {
@@ -83,6 +129,8 @@ export function resolvedPlan(session, user) {
     return { tier: 'professional', plan: planCode.includes('annual') ? PRO_ANNUAL : PRO_MONTHLY, basis: 'tuku_entitlement', access };
   }
   if (user?.isPro) return { tier: 'professional', plan: PRO_MONTHLY, basis: 'legacy_radar_pro', access: null };
+  const trial = activeRadarTrial(user);
+  if (trial) return { tier: 'professional', plan: PRO_MONTHLY, basis: 'radar_trial', access: trial };
   return { tier: 'starter', plan: STARTER, basis: 'starter', access: null };
 }
 
