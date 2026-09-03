@@ -15,7 +15,7 @@ export interface RawOpportunity {
   organization: string;
   country: string;
   region?: string;
-  type: 'job' | 'fellowship' | 'consultancy' | 'grant' | 'tender';
+  type: 'job' | 'fellowship' | 'consultancy' | 'grant' | 'tender' | 'supply' | 'conference';
   remote: boolean;
   description: string;
   requirements?: string;
@@ -43,7 +43,7 @@ export abstract class BaseScraper {
     if (!opportunity.title?.trim()) return false;
     if (!opportunity.organization?.trim()) return false;
     if (!opportunity.sourceUrl || !this.isValidUrl(opportunity.sourceUrl)) return false;
-    if (!['job', 'fellowship', 'consultancy', 'grant', 'tender'].includes(opportunity.type)) return false;
+    if (!['job', 'fellowship', 'consultancy', 'grant', 'tender', 'supply', 'conference'].includes(opportunity.type)) return false;
     if (opportunity.deadline && new Date(opportunity.deadline).getTime() < Date.now() - 86400000) return false;
     return true;
   }

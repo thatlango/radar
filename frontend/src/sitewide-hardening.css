@@ -348,3 +348,15 @@ textarea { min-height: 92px; }
   .live-feed-status { flex:1 1 220px; }
   .live-feed-status small { white-space:normal; }
 }
+
+
+/* Discovery quick filters: one-tap category and country separation. */
+.quick-discovery { display:grid; gap:8px; margin:0 0 14px; padding:12px 14px; background:#fff; border-radius:16px; box-shadow:0 1px 0 rgba(17,24,39,.05); }
+.quick-filter-row { display:grid; grid-template-columns:86px minmax(0,1fr); align-items:center; gap:10px; }
+.quick-filter-label { font-size:12px !important; font-weight:800; color:#69757c; }
+.quick-chip-scroll { display:flex; gap:7px; overflow-x:auto; scrollbar-width:none; padding:1px 0 3px; }
+.quick-chip-scroll::-webkit-scrollbar { display:none; }
+.quick-chip { flex:0 0 auto; min-height:34px; border:1px solid #e3e7e5; background:#f7f8f6; color:#4e5c62; border-radius:999px; padding:7px 11px; font-size:12.5px !important; font-weight:750; display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.quick-chip:hover { border-color:#b7c4c0; background:#f1f5f2; }
+.quick-chip.active { background:#0b6157; color:#fff; border-color:#0b6157; }
+@media (max-width:720px) { .quick-discovery { margin-inline:-2px; padding:10px 11px; } .quick-filter-row { grid-template-columns:1fr; gap:5px; } .quick-filter-label { padding-left:2px; } }

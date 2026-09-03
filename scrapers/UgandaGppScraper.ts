@@ -44,13 +44,15 @@ export class UgandaGppScraper extends BaseScraper {
   normalize(row: GppNotice): RawOpportunity {
     const title = this.cleanText(row.title);
     const procurementType = String(row.procurement_type || '');
-    const consultancy = /consult/i.test(`${title} ${procurementType}`);
+    const classificationText = `${title} ${procurementType}`;
+    const consultancy = /consult/i.test(classificationText);
+    const supply = /\b(supplies|goods)\b/i.test(procurementType) || /\bsupply (?:and delivery |and installation )?of\b|\bprocurement of .{0,60}\b(equipment|goods|materials|stationery|furniture|vehicles?|fuel)\b/i.test(title);
     const deadline = row.deadline ? new Date(row.deadline.replace(' ', 'T') + 'Z') : undefined;
     return {
       title,
       organization: this.cleanText(row.entity || 'Government of Uganda'),
       country: 'Uganda',
-      type: consultancy ? 'consultancy' : 'tender',
+      type: consultancy ? 'consultancy' : supply ? 'supply' : 'tender',
       remote: false,
       description: this.cleanText(`${title}. Procurement type: ${procurementType || 'not stated'}. Sector: ${row.sector || 'not stated'}. Financial year: ${row.financial_year || 'not stated'}.`).slice(0, 12000),
       salary: row.estimatedValue ? `UGX ${Number(row.estimatedValue).toLocaleString('en-US')}` : undefined,

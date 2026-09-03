@@ -713,6 +713,7 @@ app.get('/api/opportunities', async (req, res, next) => {
     const q = String(req.query.q || '').trim();
     const type = String(req.query.type || '').trim();
     const country = String(req.query.country || '').trim();
+    const scope = String(req.query.scope || '').trim();
     const remote = String(req.query.remote || '').trim();
     const verifiedOnly = String(req.query.verified || '').trim() === 'true';
     const deadlineDays = Math.max(0, Math.min(365, Number(req.query.deadlineDays || 0)));
@@ -722,8 +723,27 @@ app.get('/api/opportunities', async (req, res, next) => {
     const take = Math.max(1, Math.min(100, Number(req.query.limit || 40)));
     const cursor = String(req.query.cursor || '').trim();
     const now = new Date();
+    const session = await sessionFor(req);
+    let geographyClause = null;
+    if (scope === 'mine' && session) {
+      const prefs = safePrefs(session.user);
+      let countries = Array.isArray(prefs.countries) ? cleanList(prefs.countries, 20) : [];
+      const regions = Array.isArray(prefs.regions) ? cleanList(prefs.regions, 20) : [];
+      if (!countries.length) {
+        const capability = await prisma.capabilityProfile.findUnique({ where: { userId: session.userId }, select: { registrationCountry: true, countries: true } }).catch(() => null);
+        countries = [...new Set([capability?.registrationCountry, ...(capability?.countries || [])].filter(Boolean).map(String))];
+      }
+      const geoTerms = [...new Set([...countries, ...regions])];
+      if (geoTerms.length) geographyClause = { OR: [
+        ...geoTerms.map((value) => ({ country: { contains: value, mode: 'insensitive' } })),
+        ...regions.map((value) => ({ region: { contains: value, mode: 'insensitive' } })),
+        ...(prefs.remote === true ? [{ remote: true }] : []),
+      ] };
+    }
     const where = { AND: [
       { OR: [{ deadline: null }, { deadline: { gte: now } }] },
+      { sourceStatus: { not: 'expired' } },
+      ...(geographyClause ? [geographyClause] : []),
       ...(q ? [{ OR: [{ title: { contains: q, mode: 'insensitive' } }, { organization: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] }] : []),
       ...(type ? [{ type }] : []), ...(country ? [{ country: { contains: country, mode: 'insensitive' } }] : []),
       ...(remote === 'true' ? [{ remote: true }] : []),
@@ -732,7 +752,6 @@ app.get('/api/opportunities', async (req, res, next) => {
       ...(sector ? [{ sector: { contains: sector, mode: 'insensitive' } }] : []),
       ...(source ? [{ source: { contains: source, mode: 'insensitive' } }] : []),
     ] };
-    const session = await sessionFor(req);
     if (session) {
       const usage = await usageSnapshot(prisma, session.userId);
       await enforceLimit({ prisma, session, metric: 'searches', currentCount: usage.searches });

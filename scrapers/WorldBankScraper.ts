@@ -33,13 +33,15 @@ export class WorldBankScraper extends BaseScraper {
   normalize(row: WbNotice): RawOpportunity {
     const text = cheerio.load(String(row.notice_text || '')).text().replace(/\s+/g, ' ').trim();
     const method = `${row.procurement_group || ''} ${row.procurement_method_code || ''} ${row.procurement_method_name || ''} ${row.notice_type || ''}`;
-    const consultancy = /consult|quality.?cost|individual|technical assistance|\bcs\b/i.test(method);
+    const classificationText = `${method} ${row.bid_description || ''} ${text}`;
+    const consultancy = /consult|quality.?cost|individual|technical assistance|\bcs\b/i.test(classificationText);
+    const supply = /\bgoods\b/i.test(String(row.procurement_group || '')) || /\b(procurement of goods|goods and services)\b/i.test(method) || /\bsupply (?:and delivery |and installation |delivery and installation )?of\b|\bprocurement of .{0,70}\b(equipment|goods|materials|vehicles?|furniture|laboratory|computers?|software|hardware)\b|\bpurchase of .{0,70}\b(equipment|goods|materials|vehicles?|furniture)\b/i.test(`${row.bid_description || ''} ${text}`);
     const sourceUrl = `https://projects.worldbank.org/en/projects-operations/procurement-detail/${encodeURIComponent(row.id)}`;
     return {
       title: this.cleanText(row.bid_description || row.project_name || 'World Bank procurement notice'),
       organization: this.cleanText(row.contact_organization || 'World Bank-financed project'),
       country: this.cleanText(row.project_ctry_name || 'Global'),
-      type: consultancy ? 'consultancy' : 'tender',
+      type: consultancy ? 'consultancy' : supply ? 'supply' : 'tender',
       remote: this.isRemote(text),
       description: this.cleanText(`${row.project_name || ''}. ${method}. ${text}`).slice(0, 30000),
       requirements: row.bid_reference_no ? `Reference: ${row.bid_reference_no}` : undefined,

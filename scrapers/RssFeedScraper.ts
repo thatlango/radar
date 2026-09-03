@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 type FeedItem = { title: string; url: string; description: string; publishedAt?: string };
 
-const OPPORTUNITY_SIGNAL = /\b(apply|application(?:s)?(?: are)? open|call for|deadline|fellowship|scholarship|grant|funding|funded|prize|award|competition|challenge|accelerator|incubator|cohort|internship|trainee(?:ship)?|vacanc(?:y|ies)|hiring|recruit(?:ment|ing)?|consultant|consultancy|tender|procurement|request for proposal|\brfp\b|expression of interest|\beoi\b|request for quotation|\brfq\b|bid invitation|call for proposals?|open call|residency|young professionals? program|programme)\b/i;
+const OPPORTUNITY_SIGNAL = /\b(apply|application(?:s)?(?: are)? open|call for|deadline|fellowship|scholarship|grant|funding|funded|prize|award|competition|challenge|accelerator|incubator|cohort|internship|trainee(?:ship)?|vacanc(?:y|ies)|hiring|recruit(?:ment|ing)?|consultant|consultancy|tender|procurement|request for proposal|\brfp\b|expression of interest|\beoi\b|request for quotation|\brfq\b|bid invitation|call for proposals?|open call|conference|summit|symposium|call for papers?|call for abstracts?|call for participants?|call for speakers?|travel grant|delegate application|supplier|vendor|pre-?qualification|supply of|supplies|goods|residency|young professionals? program|programme)\b/i;
 const EDITORIAL_SIGNAL = /\b(opinion|analysis|explainer|how to|why |what we learned|daily newsletter|weekly newsletter|market update|interview with|podcast)\b/i;
 
 export class RssFeedScraper extends BaseScraper {
@@ -37,7 +37,7 @@ export class RssFeedScraper extends BaseScraper {
       if (publishedAt) { const when = new Date(publishedAt).getTime(); if (Number.isFinite(when) && when < Date.now() - maxAgeMs) return; }
       const text = this.cleanText(`${title} ${description}`);
       if (config.strictOpportunityFilter !== false && !OPPORTUNITY_SIGNAL.test(text)) return;
-      if (EDITORIAL_SIGNAL.test(title) && !/apply|call for|grant|funding|fellowship|scholarship|tender|consult/i.test(title)) return;
+      if (EDITORIAL_SIGNAL.test(title) && !/apply|call for|grant|funding|fellowship|scholarship|tender|consult|conference|summit|symposium|supplier|supply/i.test(title)) return;
       rows.push({ title, url, description, publishedAt });
     });
     return rows.slice(0, Math.max(20, Math.min(160, Number(config.limit || 80))));
@@ -64,10 +64,12 @@ export class RssFeedScraper extends BaseScraper {
 
   private inferType(text: string): RawOpportunity['type'] {
     const lower = text.toLowerCase();
-    if (/tender|request for proposal|\brfp\b|expression of interest|\beoi\b|procurement|bid invitation/.test(lower)) return 'tender';
+    if (/conference|summit|symposium|call for (?:papers|abstracts|participants|speakers)|conference travel|delegate application/.test(lower)) return 'conference';
+    if (/consultant|consultancy|technical assistance|advisor|advisory/.test(lower)) return 'consultancy';
+    if (/supplier|vendor pre-?qualification|supply of|supplies|procurement of goods|goods and services|equipment|materials|stationery|furniture|vehicles?|fuel/.test(lower)) return 'supply';
+    if (/tender|request for proposal|\brfp\b|expression of interest|\beoi\b|request for quotation|\brfq\b|procurement|bid invitation/.test(lower)) return 'tender';
     if (/grant|funding opportunity|call for proposals|challenge fund|innovation fund|award|prize/.test(lower)) return 'grant';
     if (/fellowship|scholarship|training|accelerator|incubator|cohort|residency/.test(lower)) return 'fellowship';
-    if (/consultant|consultancy|technical assistance|advisor|advisory/.test(lower)) return 'consultancy';
     return 'job';
   }
 
