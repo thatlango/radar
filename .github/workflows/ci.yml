@@ -43,8 +43,25 @@ jobs:
       - name: Prepare disposable CI database
         run: npx prisma db push --skip-generate
       - name: Typecheck
-        run: npm run lint
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ci-typecheck.log
       - name: Tests
-        run: npm test -- --runInBand
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test -- --runInBand 2>&1 | tee ci-test.log
       - name: Production build
-        run: npm run build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee ci-build.log
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar-ci-logs
+          path: ci-*.log
+          if-no-files-found: ignore
+          retention-days: 3
