@@ -41,14 +41,14 @@ function sanitizeOpportunity(row) {
     ...row,
     title: normalizeDisplayText(row.title) || 'Opportunity',
     organization: normalizeDisplayText(row.organization) || 'Organisation not listed',
-    country: normalizeScalarText(row.country) || row.country || '',
+    country: normalizeScalarText(row.country),
     region: normalizeScalarText(row.region),
     summary: normalizeDisplayText(row.summary),
     description: normalizeDisplayText(row.description),
     requirements: normalizeDisplayText(row.requirements),
     compensation: normalizeScalarText(row.compensation),
     salary: normalizeScalarText(row.salary),
-    source: normalizeScalarText(row.source) || row.source || '',
+    source: normalizeScalarText(row.source),
   };
 }
 
