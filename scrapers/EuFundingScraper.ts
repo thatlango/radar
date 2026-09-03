@@ -5,6 +5,8 @@ import { BaseScraper, RawOpportunity, ScraperConfig } from "./BaseScraper";
 
 type EuResult = { summary?: string; url?: string; metadata?: Record<string, any> };
 
+const STRUCTURED_METADATA_KEYS = /(?:budgetYearsColumns|budgetTopicActions|expectedGrants|minContribution|maxContribution|aggregationField|facet|metadata)/i;
+
 export class EuFundingScraper extends BaseScraper {
   constructor(config: ScraperConfig) { super({ rateLimit: 30, timeout: 30000, ...config }); }
 
@@ -33,7 +35,7 @@ export class EuFundingScraper extends BaseScraper {
     const title = this.cleanText(this.first(metadata.title) || row.summary || identifier || "EU funding opportunity");
     const description = this.cleanText(cheerio.load(String(this.first(metadata.description) || row.summary || "")).text());
     const deadline = this.deadlines(metadata.deadlineDate).filter((date) => date.getTime() >= Date.now() - 86400000).sort((a, b) => a.getTime() - b.getTime())[0];
-    const budget = this.first(metadata.budgetOverview) || this.first(metadata.budget);
+    const budget = this.displayScalar(metadata.budgetOverview) || this.displayScalar(metadata.budget);
     return {
       title,
       organization: "European Commission",
@@ -41,14 +43,32 @@ export class EuFundingScraper extends BaseScraper {
       type: "grant",
       remote: false,
       description: this.cleanText(`${identifier ? `Reference: ${identifier}. ` : ""}${this.first(metadata.callTitle) || ""}. ${description}`).slice(0, 30000),
-      salary: budget ? this.cleanText(String(budget)).slice(0, 240) : undefined,
+      salary: budget,
       deadline,
       sourceUrl: identifier ? `https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/${encodeURIComponent(identifier)}` : String(row.url || "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-search"),
       source: "EU Funding & Tenders — Grants & Calls",
     };
   }
 
-  private first(value: any): string { return Array.isArray(value) ? String(value[0] || "") : String(value || ""); }
+  private first(value: any): string {
+    const values = Array.isArray(value) ? value : [value];
+    const candidate = values.find((item) => typeof item === "string" || typeof item === "number");
+    return candidate == null ? "" : String(candidate);
+  }
+
+  private displayScalar(value: any): string | undefined {
+    const values = Array.isArray(value) ? value : [value];
+    for (const candidate of values) {
+      if (typeof candidate !== "string" && typeof candidate !== "number") continue;
+      const text = this.cleanText(String(candidate));
+      if (!text || text.length > 180) continue;
+      if (/^[\[{]/.test(text) || STRUCTURED_METADATA_KEYS.test(text)) continue;
+      if (/[\[{].*[:]/.test(text)) continue;
+      return text;
+    }
+    return undefined;
+  }
+
   private deadlines(value: any): Date[] {
     const items = Array.isArray(value) ? value : value ? [value] : [];
     return items.map((item) => new Date(String(item))).filter((date) => !Number.isNaN(date.getTime()));
