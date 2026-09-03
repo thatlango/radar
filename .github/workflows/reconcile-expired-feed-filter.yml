@@ -1,0 +1,27 @@
+name: Reconcile expired feed exclusion
+on:
+  push:
+    branches:
+      - feature/country-categories-conferences-supplies-20260903
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download exact production patch
+        run: |
+          curl -fsSL https://radar.tukutuku.org/radar-expired-filter.patch -o /tmp/radar.patch
+          echo "59ca3bec147b17dd9fa039bca764f705e33d993bb68d388e46bc6086a7bc1a84  /tmp/radar.patch" | sha256sum -c -
+      - name: Apply production delta
+        run: |
+          git apply --index /tmp/radar.patch
+          rm .github/workflows/reconcile-expired-feed-filter.yml
+          git add -A
+          git config user.name "radar-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Exclude expired opportunities from Discovery"
+          git push origin HEAD
