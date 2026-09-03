@@ -13,16 +13,17 @@ export type RadarSourceDefinition = {
   name: string;
   domain: string;
   discovery: 'primary' | 'secondary';
-  adapter: 'rss' | 'page' | 'search' | 'linkedin' | 'afdb' | 'worldbank' | 'ugandagpp' | 'eufunding' | 'grantsgov' | 'unpartner' | 'brightermonday' | 'impactpool' | 'euraxess' | 'idrc' | 'grandchallenges';
+  adapter: 'rss' | 'page' | 'search' | 'indico' | 'linkedin' | 'afdb' | 'worldbank' | 'ugandagpp' | 'eufunding' | 'grantsgov' | 'unpartner' | 'brightermonday' | 'impactpool' | 'euraxess' | 'idrc' | 'grandchallenges';
   trust: 'official' | 'curated' | 'secondary';
   baseUrl?: string;
   feedUrl?: string;
   pages?: string[];
-  defaultType?: 'job' | 'fellowship' | 'consultancy' | 'grant' | 'tender';
+  defaultType?: 'job' | 'fellowship' | 'consultancy' | 'grant' | 'tender' | 'supply' | 'conference';
   defaultCountry?: string;
   organization?: string;
   requireOpportunityKeyword?: boolean;
   frequency?: 'hourly' | 'daily' | 'weekly';
+  scanProfile?: string;
 };
 
 // Radar uses two acquisition layers:
@@ -39,6 +40,7 @@ export const RADAR_SOURCE_CATALOG: RadarSourceDefinition[] = [
   { name: 'Terra Viva Grants', domain: 'terravivagrants.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.terravivagrants.org/', feedUrl: 'https://www.terravivagrants.org/feed/', defaultType: 'grant', frequency: 'daily' },
   { name: 'Opportunities for Youth', domain: 'opportunitiesforyouth.org', discovery: 'secondary', adapter: 'rss', trust: 'curated', baseUrl: 'https://opportunitiesforyouth.org/', feedUrl: 'https://opportunitiesforyouth.org/feed/', frequency: 'daily' },
   { name: 'JobsToApply.com', domain: 'jobstoapply.com', discovery: 'primary', adapter: 'page', trust: 'curated', baseUrl: 'https://jobstoapply.com/', pages: ['https://jobstoapply.com/','https://jobstoapply.com/?ao_page=2','https://jobstoapply.com/?ao_page=3','https://jobstoapply.com/?ao_page=4','https://jobstoapply.com/?ao_page=5','https://jobstoapply.com/?ao_page=6','https://jobstoapply.com/?ao_page=7','https://jobstoapply.com/?ao_page=8'], defaultType: 'job', frequency: 'hourly' },
+  { name: 'UN Conferences & Participation', domain: 'indico.un.org', discovery: 'primary', adapter: 'indico', trust: 'official', baseUrl: 'https://indico.un.org/', defaultType: 'conference', frequency: 'hourly', scanProfile: 'conference-participation' },
 
   // Structured funding, partnership and specialist opportunity sources.
   { name: 'EU Funding & Tenders — Grants & Calls', domain: 'ec.europa.eu', discovery: 'primary', adapter: 'eufunding', trust: 'official', baseUrl: 'https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-search', defaultType: 'grant', organization: 'European Commission', frequency: 'daily' },
@@ -178,6 +180,26 @@ export const SCAN_PROFILES: ScanProfile[] = [
     priorityDomains: RADAR_SOURCE_CATALOG.map((source) => source.domain),
   },
   {
+    id: 'conference-participation',
+    name: 'Conferences, summits & funded participation',
+    description: 'Conferences and summits with open registration, calls for participants, speakers, papers/abstracts, delegates or funded travel support.',
+    opportunityTypes: ['conference'],
+    keywords: ['conference registration', 'call for participants', 'call for papers', 'call for abstracts', 'call for speakers', 'travel grant', 'funded participation', 'delegate application', 'summit application', 'conference scholarship'],
+    geographies: ['Uganda', 'East Africa', 'Africa', 'Global South', 'Global'],
+    minDaysToDeadline: 3,
+    priorityDomains: ['indico.un.org','un.org','itu.int','unesco.org','unfccc.int','au.int','worldbank.org'],
+  },
+  {
+    id: 'procurement-supplies',
+    name: 'Procurement, supplies & vendor opportunities',
+    description: 'Tenders, RFQs, supplier prequalification, framework agreements and procurement of goods, equipment and supplies.',
+    opportunityTypes: ['tender', 'supply'],
+    keywords: ['request for quotation', 'RFQ', 'supplier prequalification', 'vendor prequalification', 'supply of', 'procurement of goods', 'framework agreement', 'invitation to bid', 'tender notice', 'bid invitation'],
+    geographies: ['Uganda', 'East Africa', 'Africa', 'Global'],
+    minDaysToDeadline: 3,
+    priorityDomains: ['gpp.ppda.go.ug','ungm.org','procurement-notices.undp.org','worldbank.org','afdb.org','au.int'],
+  },
+  {
     id: 'innovation-entrepreneurship',
     name: 'Innovation & entrepreneurship',
     description: 'Innovation ecosystems, accelerators, incubators, entrepreneurship programmes, venture support and enterprise growth opportunities.',
@@ -199,6 +221,18 @@ export function getScanProfile(id?: string | null): ScanProfile {
 
 export function buildDiscoveryQueries(profile: ScanProfile, customIntent?: string, customSkills: string[] = []): string[] {
   const intent = String(customIntent || '').trim();
+  if (profile.id === 'conference-participation') return [
+    '("call for participants" OR "conference registration" OR "summit registration") (Africa OR Uganda OR "East Africa") 2026',
+    '("call for papers" OR "call for abstracts" OR "call for speakers") conference Africa 2026',
+    '("travel grant" OR "funded participation" OR "conference scholarship") conference OR summit Africa 2026',
+    '("delegate application" OR "participant registration") summit OR forum OR conference Africa 2026',
+  ];
+  if (profile.id === 'procurement-supplies') return [
+    '(RFQ OR "request for quotation" OR "supplier prequalification") (Uganda OR Kenya OR Rwanda OR Tanzania)',
+    '("supply of" OR "procurement of goods" OR "vendor prequalification") Africa deadline',
+    '("framework agreement" OR "invitation to bid" OR tender) supplies OR equipment Africa',
+    '(procurement OR tender OR RFQ) (goods OR supplies OR equipment) Uganda',
+  ];
   const skills = customSkills.filter(Boolean).slice(0, 10).join(' OR ');
   const core = profile.keywords.slice(0, 24);
   const queries = [

@@ -22,7 +22,7 @@ const VIEW_META = {
 };
 
 const CARD_TONES = ['peach', 'mint', 'lavender', 'sky', 'rose', 'sand'];
-const DEFAULT_FILTERS = { q: '', type: '', country: '', minValue: '', deadlineDays: '', verified: true, remote: false };
+const DEFAULT_FILTERS = { q: '', type: '', country: '', scope: 'auto', minValue: '', deadlineDays: '', verified: true, remote: false };
 const spring = { type: 'spring', stiffness: 310, damping: 30 };
 
 function cx(...parts) { return parts.filter(Boolean).join(' '); }
@@ -63,7 +63,7 @@ function decisionAssessment(row) {
   if (hard.length >= 2 || score < 50 || deadlineFeasibility === 0) label = 'SKIP';
   else if (!hard.length && score >= 72 && eligibility >= 70) label = 'PURSUE';
   const tone = label === 'PURSUE' ? 'pursue' : label === 'SKIP' ? 'skip' : 'consider';
-  const effortPoints = missing.length + specialist.length * 2 + (days != null && days <= 7 ? 2 : 0) + (['tender','grant','consultancy'].includes(String(row.type || '').toLowerCase()) ? 2 : 0);
+  const effortPoints = missing.length + specialist.length * 2 + (days != null && days <= 7 ? 2 : 0) + (['tender','supply','grant','consultancy'].includes(String(row.type || '').toLowerCase()) ? 2 : 0);
   const effort = effortPoints >= 7 ? 'High' : effortPoints >= 4 ? 'Medium' : 'Low';
   const primaryRisk = hard[0] || missing[0] || (days != null && days <= 5 ? `Only ${Math.max(0, days)} days remain` : null) || 'No major blocker identified from current evidence';
   const nextAction = hard[0]
@@ -122,8 +122,18 @@ function App() {
   const requireAuth = () => { if (session) return true; setAuthOpen(true); notify('Sign in to use this Radar action.'); return false; };
 
   async function loadSession() {
-    try { setSession(await api('/api/session')); }
-    catch { setSession(null); }
+    try {
+      const nextSession = await api('/api/session');
+      setSession(nextSession);
+      const preferredCountries = Array.isArray(nextSession?.user?.preferences?.countries) ? nextSession.user.preferences.countries.filter(Boolean) : [];
+      let hasSavedGeography = preferredCountries.length > 0;
+      if (!hasSavedGeography) {
+        const capabilityResult = await api('/api/me/capability').catch(() => null);
+        const savedCapability = capabilityResult?.capability;
+        hasSavedGeography = Boolean(savedCapability?.registrationCountry || savedCapability?.countries?.length);
+      }
+      setFilters((current) => current.scope === 'auto' ? { ...current, scope: hasSavedGeography ? 'mine' : 'all' } : current);
+    } catch { setSession(null); setFilters((current) => current.scope === 'auto' ? { ...current, scope: 'all' } : current); }
   }
   async function loadStats() { try { setStats(await api('/api/stats')); } catch { setStats(null); } }
   async function loadFeedPulse() { if (!session) return setFeedPulse(null); try { setFeedPulse(await api('/api/me/feed-summary')); } catch { setFeedPulse(null); } }
@@ -136,6 +146,7 @@ function App() {
       const p = new URLSearchParams();
       if (next.q?.trim()) p.set('q', next.q.trim());
       if (next.type) p.set('type', next.type);
+      if (next.scope === 'mine') p.set('scope', 'mine');
       if (next.country?.trim()) p.set('country', next.country.trim());
       if (next.minValue) p.set('minValue', next.minValue);
       if (next.deadlineDays) p.set('deadlineDays', next.deadlineDays);
@@ -393,7 +404,7 @@ function App() {
   const trialDays = subscription?.basis === 'radar_trial' && subscription?.tukuAccess?.endsAt ? Math.max(0, Math.ceil((new Date(subscription.tukuAccess.endsAt).getTime() - Date.now()) / 86400000)) : null;
 
   return <div className="radar-app">
-    <Sidebar view={view} setView={setView} session={session} mobileNav={mobileNav} setMobileNav={setMobileNav} trialDays={trialDays} onNewSearch={() => { setFilters(DEFAULT_FILTERS); setSelected(null); setView('discover'); }} />
+    <Sidebar view={view} setView={setView} session={session} mobileNav={mobileNav} setMobileNav={setMobileNav} trialDays={trialDays} onNewSearch={() => { setFilters((current) => ({ ...DEFAULT_FILTERS, scope: current.scope === 'mine' ? 'mine' : 'all' })); setSelected(null); setView('discover'); }} />
     <div className="app-stage">
       <Topbar filters={filters} onSearch={(q) => { setFilters((f) => ({ ...f, q })); if (view !== 'discover') setView('discover'); }} session={session} onAuth={() => setAuthOpen(true)} onLogout={logout} unread={unread} onNotifications={() => setView('profile')} onAI={() => setAiOpen(true)} onMobile={() => setMobileNav(true)} />
       <main className="page-stage">
@@ -449,8 +460,9 @@ function DiscoveryView({ stats, opportunities, loading, loadingMore, pageInfo, s
     {session && <TodayQueue queue={priorityQueue} openOpportunity={openOpportunity} openWorkspace={openWorkspace} />}
     {session && <FeedPulse pulse={feedPulse} onShowNew={onShowNew} />}
     <div className="discovery-shell">
+      <QuickDiscoveryFilters filters={filters} setFilters={setFilters} session={session} />
       <FilterRail filters={filters} setFilters={setFilters} />
-      <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches${pageInfo?.hasMore ? ' · more available' : ''}`}</p></div><div className="feed-toolbar"><LiveFeedStatus feed={stats?.feed}/><button className="compact-btn" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} size={16}/> Refresh</button></div></div>{loading ? <CardSkeletons /> : opportunities.length ? <><div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>{pageInfo?.hasMore && <div className="feed-more"><button className="button ghost" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? <LoaderCircle className="spin"/> : <Plus/>}{loadingMore ? 'Loading more…' : 'Load more opportunities'}</button></div>}</> : <div className="feed-empty"><Search/><h3>No opportunities match these filters</h3><p>Broaden a filter or reset the search. Radar will keep the verified-source filter on by default.</p><button className="button ghost" onClick={() => setFilters(DEFAULT_FILTERS)}>Reset filters</button></div>}</section>
+      <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches${pageInfo?.hasMore ? ' · more available' : ''}`}</p></div><div className="feed-toolbar"><LiveFeedStatus feed={stats?.feed}/><button className="compact-btn" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} size={16}/> Refresh</button></div></div>{loading ? <CardSkeletons /> : opportunities.length ? <><div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>{pageInfo?.hasMore && <div className="feed-more"><button className="button ghost" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? <LoaderCircle className="spin"/> : <Plus/>}{loadingMore ? 'Loading more…' : 'Load more opportunities'}</button></div>}</> : <div className="feed-empty"><Search/><h3>No opportunities match these filters</h3><p>Broaden a filter or reset the search. Radar will keep the verified-source filter on by default.</p><button className="button ghost" onClick={() => setFilters((current) => ({ ...DEFAULT_FILTERS, scope: current.scope === 'mine' ? 'mine' : 'all' }))}>Reset filters</button></div>}</section>
       <OpportunityPanel row={selected} onClose={onClose} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />
     </div>
   </div>;
@@ -483,11 +495,30 @@ function TodayQueue({ queue, openOpportunity, openWorkspace }) {
   return <section className="today-queue"><div className="today-head"><div><span className="eyebrow">Your Radar today</span><h2>What deserves attention now</h2></div><div className="today-summary"><span><strong>{summary.actNow || 0}</strong> urgent</span><span><strong>{summary.strongMatches || 0}</strong> strong matches</span><span><strong>{summary.evidenceGaps || 0}</strong> unlockable</span></div></div><div className="today-items">{items.slice(0,4).map((item) => <button key={`${item.kind}-${item.opportunity?.id}`} className={cx('today-item', item.urgency)} onClick={() => item.workspaceId ? openWorkspace(item.workspaceId) : openOpportunity(item.opportunity?.id)}><span className="today-kind">{kindLabel[item.kind] || 'NEXT'}</span><strong>{item.opportunity?.title || item.title}</strong><p>{item.title}</p><small>{item.reason}</small><div><span>{item.action}</span><ArrowUpRight size={15}/></div></button>)}</div></section>;
 }
 
+const QUICK_TYPES = [
+  ['', 'For You'], ['job', 'Jobs'], ['consultancy', 'Consulting'], ['tender', 'Tenders / RFPs'], ['supply', 'Supplies'], ['grant', 'Grants'], ['conference', 'Conferences'], ['fellowship', 'Fellowships'],
+];
+const QUICK_COUNTRIES = ['Uganda','Kenya','Rwanda','Tanzania','Ethiopia','Ghana','Nigeria','South Africa'];
+function QuickDiscoveryFilters({ filters, setFilters, session }) {
+  const preferredCountries = Array.isArray(session?.user?.preferences?.countries) ? session.user.preferences.countries.filter(Boolean) : [];
+  const setType = (type) => setFilters((current) => ({ ...current, type }));
+  const setCountry = (country) => setFilters((current) => ({ ...current, scope: country ? 'country' : 'all', country, remote: false }));
+  return <section className="quick-discovery" aria-label="Quick opportunity filters">
+    <div className="quick-filter-row"><span className="quick-filter-label">Opportunity</span><div className="quick-chip-scroll">{QUICK_TYPES.map(([value,label]) => <button key={label} className={cx('quick-chip', filters.type === value && 'active')} onClick={() => setType(value)}>{label}</button>)}</div></div>
+    <div className="quick-filter-row"><span className="quick-filter-label">Country</span><div className="quick-chip-scroll">
+      {(preferredCountries.length > 0 || filters.scope === 'mine') && <button className={cx('quick-chip', filters.scope === 'mine' && 'active')} onClick={() => setFilters((current) => ({ ...current, scope: 'mine', country: '', remote: false }))}>My countries</button>}
+      <button className={cx('quick-chip', filters.scope === 'all' && !filters.country && !filters.remote && 'active')} onClick={() => setCountry('')}>All countries</button>
+      {QUICK_COUNTRIES.map((country) => <button key={country} className={cx('quick-chip', filters.country === country && 'active')} onClick={() => setCountry(country)}>{country}</button>)}
+      <button className={cx('quick-chip', filters.remote && 'active')} onClick={() => setFilters((current) => ({ ...current, scope: 'all', country: '', remote: !current.remote }))}><Globe2 size={13}/> Remote</button>
+    </div></div>
+  </section>;
+}
+
 function FilterRail({ filters, setFilters }) {
   const patch = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
-  return <aside className="filter-rail"><div className="filter-head"><div><SlidersHorizontal size={18}/><strong>Filters</strong></div><button onClick={() => setFilters(DEFAULT_FILTERS)}>Reset</button></div>
-    <label>Category<select value={filters.type} onChange={(e) => patch('type', e.target.value)}><option value="">All opportunities</option><option value="job">Jobs</option><option value="consultancy">Consulting</option><option value="tender">Tenders / RFPs</option><option value="grant">Grants</option><option value="fellowship">Fellowships</option><option value="internship">Internships</option></select></label>
-    <label>Country or region<input value={filters.country} onChange={(e) => patch('country', e.target.value)} placeholder="Uganda, East Africa…" /></label>
+  return <aside className="filter-rail"><div className="filter-head"><div><SlidersHorizontal size={18}/><strong>More filters</strong></div><button onClick={() => setFilters({ ...DEFAULT_FILTERS, scope: 'all' })}>Reset</button></div>
+    <label>Category<select value={filters.type} onChange={(e) => patch('type', e.target.value)}><option value="">All opportunities</option><option value="job">Jobs</option><option value="consultancy">Consulting</option><option value="tender">Tenders / RFPs</option><option value="supply">Supplies / RFQs</option><option value="grant">Grants</option><option value="conference">Conferences</option><option value="fellowship">Fellowships</option><option value="internship">Internships</option></select></label>
+    <label>Country or region<input value={filters.country} onChange={(e) => setFilters((f) => ({ ...f, country: e.target.value, scope: e.target.value ? 'country' : 'all' }))} placeholder="Uganda, Kenya, Ghana…" /></label>
     <label>Minimum stated value<input type="number" min="0" step="1000" value={filters.minValue} onChange={(e) => patch('minValue', e.target.value)} placeholder="0" /></label>
     <label>Closing within<select value={filters.deadlineDays} onChange={(e) => patch('deadlineDays', e.target.value)}><option value="">Any runway</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label>
     <label className="checkline"><input type="checkbox" checked={filters.verified} onChange={(e) => patch('verified', e.target.checked)} /><span><Check size={13}/> Verified only</span></label>

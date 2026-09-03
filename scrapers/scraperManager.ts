@@ -15,6 +15,7 @@ import { ImpactpoolScraper } from './ImpactpoolScraper';
 import { EuraxessScraper } from './EuraxessScraper';
 import { IdrcScraper } from './IdrcScraper';
 import { GrandChallengesScraper } from './GrandChallengesScraper';
+import { IndicoScraper } from './IndicoScraper';
 import { RADAR_SOURCE_CATALOG } from './scanProfiles';
 
 const prisma = new PrismaClient();
@@ -62,7 +63,7 @@ export class ScraperManager {
 
     for (const definition of RADAR_SOURCE_CATALOG) {
       const adapter = definition.adapter;
-      const active = ['rss','page','afdb','worldbank','ugandagpp','eufunding','grantsgov','unpartner','brightermonday','impactpool','euraxess','idrc','grandchallenges'].includes(adapter)
+      const active = ['rss','page','indico','afdb','worldbank','ugandagpp','eufunding','grantsgov','unpartner','brightermonday','impactpool','euraxess','idrc','grandchallenges'].includes(adapter)
         ? true
         : adapter === 'linkedin'
           ? linkedInAvailable
@@ -79,7 +80,7 @@ export class ScraperManager {
         defaultCountry: definition.defaultCountry,
         organization: definition.organization,
         requireOpportunityKeyword: definition.requireOpportunityKeyword,
-        scanProfile: 'all',
+        scanProfile: definition.scanProfile || 'all',
       };
       const row = await prisma.scraperSource.findFirst({ where: { name: definition.name } });
       if (row) {
@@ -170,6 +171,7 @@ export class ScraperManager {
     const config = source?.config && typeof source.config === 'object' ? source.config as any : {};
     const adapter = String(config.adapter || '').toLowerCase();
     if (adapter === 'rss') return RssFeedScraper;
+    if (adapter === 'indico') return IndicoScraper;
     if (adapter === 'page') return PublicPageScraper;
     if (adapter === 'search') return WebDiscoveryScraper;
     if (adapter === 'worldbank') return WorldBankScraper;
