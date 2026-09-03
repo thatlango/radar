@@ -40,6 +40,41 @@ function trustLabel(row) {
   if (row?.verificationStatus === 'needs_review' || row?.sourceStatus === 'stale') return ['Needs re-check', 'warn'];
   return [Number(row?.sourceCount || 1) > 1 ? `${row.sourceCount} sources` : 'Verified', 'success'];
 }
+function eligibilityStatusLabel(status) {
+  return ({ met: 'Met', likely_met: 'Likely met', missing_evidence: 'Evidence needed', not_met: 'Not met', partner_solvable: 'Partner-solvable' })[status] || 'Review';
+}
+function decisionAssessment(row) {
+  if (!row || row.fitScore == null) return null;
+  const evidence = row.fitEvidence || {};
+  const hard = Array.isArray(evidence.hardConstraints) ? evidence.hardConstraints : [];
+  const missing = Array.isArray(evidence.missingRequirements) ? evidence.missingRequirements : [];
+  const specialist = Array.isArray(evidence.specialistNeeds) ? evidence.specialistNeeds : [];
+  const matches = Array.isArray(evidence.keySkillMatches) ? evidence.keySkillMatches : [];
+  const fit = Math.max(0, Math.min(100, Number(row.fitScore || 0)));
+  const confidence = Math.max(0, Math.min(100, Math.round(Number(evidence.confidence ?? .5) * 100)));
+  const eligibility = Math.max(0, Math.min(100, 96 - hard.length * 32 - missing.length * 7));
+  const evidenceStrength = Math.max(10, Math.min(100, 58 + matches.length * 6 - missing.length * 10 - hard.length * 8));
+  const days = row.deadline ? Math.ceil((new Date(row.deadline).getTime() - Date.now()) / 86400000) : null;
+  const deadlineFeasibility = days == null ? 78 : days < 0 ? 0 : days <= 2 ? 28 : days <= 5 ? 52 : days <= 10 ? 72 : days <= 30 ? 90 : 84;
+  const score = Math.round(fit * .40 + eligibility * .23 + evidenceStrength * .14 + deadlineFeasibility * .13 + confidence * .10);
+  let label = 'CONSIDER';
+  if (hard.length >= 2 || score < 50 || deadlineFeasibility === 0) label = 'SKIP';
+  else if (!hard.length && score >= 72 && eligibility >= 70) label = 'PURSUE';
+  const tone = label === 'PURSUE' ? 'pursue' : label === 'SKIP' ? 'skip' : 'consider';
+  const effortPoints = missing.length + specialist.length * 2 + (days != null && days <= 7 ? 2 : 0) + (['tender','grant','consultancy'].includes(String(row.type || '').toLowerCase()) ? 2 : 0);
+  const effort = effortPoints >= 7 ? 'High' : effortPoints >= 4 ? 'Medium' : 'Low';
+  const primaryRisk = hard[0] || missing[0] || (days != null && days <= 5 ? `Only ${Math.max(0, days)} days remain` : null) || 'No major blocker identified from current evidence';
+  const nextAction = hard[0]
+    ? `Verify or resolve: ${hard[0]}`
+    : missing[0]
+      ? `Find evidence for: ${missing[0]}`
+      : specialist[0]
+        ? `Identify a specialist or partner for: ${specialist[0]}`
+        : days != null && days <= 7
+          ? 'Make the go/no-go decision today and start the application package.'
+          : 'Review the source requirements and start the application workspace.';
+  return { label, tone, score, fit: Math.round(fit), eligibility, evidenceStrength, deadlineFeasibility, confidence, effort, primaryRisk, nextAction };
+}
 
 function App() {
   const [view, setView] = useState('discover');
@@ -49,12 +84,14 @@ function App() {
   const [opportunities, setOpportunities] = useState([]);
   const [selected, setSelected] = useState(null);
   const [opportunityLoading, setOpportunityLoading] = useState(true);
+  const [priorityQueue, setPriorityQueue] = useState(null);
   const [filters, setFilters] = useState({ q: '', type: '', country: '', minValue: '', deadlineDays: '', verified: true, remote: false });
   const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [activeDocId, setActiveDocId] = useState(null);
   const [applications, setApplications] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [evidenceHealth, setEvidenceHealth] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [profile, setProfile] = useState(null);
   const [capability, setCapability] = useState(null);
@@ -110,7 +147,12 @@ function App() {
     if (view === 'profile' && session) loadProfileBundle();
     if (view === 'subscription') loadPlans();
   }, [view, session]);
-  useEffect(() => { if (session) loadNotifications(); }, [session]);
+  useEffect(() => { if (session) { loadNotifications(); loadPriorityQueue(); } else setPriorityQueue(null); }, [session]);
+
+  async function loadPriorityQueue() {
+    try { setPriorityQueue(await api('/api/me/priority-queue')); }
+    catch { setPriorityQueue(null); }
+  }
 
   async function loadWorkspaces() {
     try { const data = await api('/api/me/workspaces'); setWorkspaces(data.items || []); }
@@ -191,11 +233,31 @@ function App() {
     setBusy(`opp-${kind}`);
     try {
       const data = await api(`/api/opportunities/${selected.id}/${kind}`, { method: 'POST', body: '{}' });
-      setSelected((old) => ({ ...old, aiResult: data.explanation || data.text || 'Analysis complete.', fitScore: data.fitScore ?? old.fitScore }));
+      setSelected((old) => {
+        const next = { ...old, aiResult: data.explanation || data.text || 'Analysis complete.', fitScore: data.fitScore ?? old.fitScore };
+        if (kind === 'eligibility') {
+          next.eligibilityResult = data;
+          next.fitEvidence = {
+            ...(old.fitEvidence || {}),
+            explanation: data.explanation || old.fitEvidence?.explanation || '',
+            keySkillMatches: data.keySkillMatches || old.fitEvidence?.keySkillMatches || [],
+            missingRequirements: data.missingRequirements || old.fitEvidence?.missingRequirements || [],
+            hardConstraints: data.hardConstraints || old.fitEvidence?.hardConstraints || [],
+            specialistNeeds: data.specialistNeeds || old.fitEvidence?.specialistNeeds || [],
+            confidence: data.confidence ?? old.fitEvidence?.confidence ?? .5,
+          };
+        }
+        return next;
+      });
     } catch (error) { notify(error.message); } finally { setBusy(''); }
   }
 
-  async function loadDocuments() { try { const data = await api('/api/me/documents'); setDocuments(data.items || []); } catch (error) { notify(error.message); } }
+  async function loadDocuments() {
+    try {
+      const [data, health] = await Promise.all([api('/api/me/documents'), api('/api/me/evidence-health')]);
+      setDocuments(data.items || []); setEvidenceHealth(health);
+    } catch (error) { notify(error.message); }
+  }
   async function addLibraryDocument(payload) {
     try { await api('/api/me/documents', { method: 'POST', body: JSON.stringify(payload) }); await loadDocuments(); notify('Golden document saved.'); }
     catch (error) { notify(error.message); }
@@ -248,10 +310,10 @@ function App() {
       <Topbar filters={filters} setFilters={setFilters} session={session} onAuth={() => setAuthOpen(true)} onLogout={logout} unread={unread} onNotifications={() => setView('profile')} onAI={() => setAiOpen(true)} onMobile={() => setMobileNav(true)} />
       <main className="page-stage">
         <AnimatePresence mode="wait">
-          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} selected={selected} filters={filters} setFilters={setFilters} openOpportunity={openOpportunity} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
+          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} selected={selected} filters={filters} setFilters={setFilters} priorityQueue={priorityQueue} openOpportunity={openOpportunity} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'workspace' && <motion.div key="workspace" {...pageMotion}><WorkspaceView session={session} workspaces={workspaces} workspace={workspace} openWorkspace={openWorkspace} activeDocId={activeDocId} setActiveDocId={setActiveDocId} generatePlan={generatePlan} saveDocument={saveDocument} aiDraftDocument={aiDraftDocument} aiReviewDocument={aiReviewDocument} addMember={addMember} addComment={addComment} finalizeWorkspace={finalizeWorkspace} recordSubmission={recordSubmission} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'applications' && <motion.div key="applications" {...pageMotion}><ApplicationsView session={session} applications={applications} onAuth={() => setAuthOpen(true)} /></motion.div>}
-          {view === 'documents' && <motion.div key="documents" {...pageMotion}><DocumentsView session={session} documents={documents} addDocument={addLibraryDocument} deleteDocument={deleteDocument} extractEvidence={extractEvidence} onAuth={() => setAuthOpen(true)} /></motion.div>}
+          {view === 'documents' && <motion.div key="documents" {...pageMotion}><DocumentsView session={session} documents={documents} evidenceHealth={evidenceHealth} addDocument={addLibraryDocument} deleteDocument={deleteDocument} extractEvidence={extractEvidence} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'analytics' && <motion.div key="analytics" {...pageMotion}><AnalyticsView session={session} analytics={analytics} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'profile' && <motion.div key="profile" {...pageMotion}><ProfileView session={session} profile={profile} capability={capability} briefing={briefing} notifications={notifications} unread={unread} markAllRead={markAllRead} saveProfile={saveProfile} saveCapability={saveCapability} saveBriefing={saveBriefing} uploadResume={uploadResume} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'subscription' && <motion.div key="subscription" {...pageMotion}><SubscriptionView catalog={catalog} subscription={subscription} annual={annual} setAnnual={setAnnual} checkout={checkout} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
@@ -260,7 +322,7 @@ function App() {
     </div>
     <AuthModal open={authOpen} setOpen={setAuthOpen} mode={authMode} setMode={setAuthMode} onSuccess={async () => { setAuthOpen(false); await loadSession(); notify('Welcome to Radar.'); }} notify={notify} />
     <AIDrawer open={aiOpen} setOpen={setAiOpen} messages={aiMessages} onAsk={askAI} context={workspace?.opportunity?.title || selected?.title || 'General Radar context'} />
-    <AnimatePresence>{toast && <motion.div className="toast" initial={{ y: 40, opacity: 0 }} animate={{ opacity: 1, y: 0 }} exit={{ y: 20, opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toast && <motion.div className="toast" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
   </div>;
 }
 
@@ -291,16 +353,25 @@ function Topbar({ filters, setFilters, session, onAuth, onLogout, unread, onNoti
 function PageTitle({ eyebrow, title, copy, action }) { return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></div>{action}</div>; }
 function StatCard({ icon: Icon, label, value, note, tone = 'navy' }) { return <motion.article className={cx('stat-card', tone)} whileHover={{ y: -3 }} transition={spring}><div className="stat-icon"><Icon size={18} /></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></motion.article>; }
 
-function DiscoveryView({ stats, opportunities, loading, selected, filters, setFilters, openOpportunity, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
+function DiscoveryView({ stats, opportunities, loading, selected, filters, setFilters, priorityQueue, openOpportunity, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
   return <div>
     <PageTitle eyebrow="Opportunity intelligence" title="Find work worth chasing." copy="A live, verified feed ranked around fit, timing and evidence—not an endless job board." action={<div className="hero-chip"><ShieldCheck size={17} /> Verified live feed</div>} />
     <div className="stats-row"><StatCard icon={Target} label="Live opportunities" value={Number(stats?.live || 0).toLocaleString()} note="currently open" tone="gold"/><StatCard icon={Globe2} label="Remote" value={Number(stats?.remote || 0).toLocaleString()} note="location-flexible" tone="teal"/><StatCard icon={Clock3} label="Closing soon" value={Number(stats?.closingSoon || 0).toLocaleString()} note="within 14 days" tone="pumpkin"/><StatCard icon={ShieldCheck} label="Active sources" value={Number(stats?.activeSources || 0).toLocaleString()} note="scanning now" tone="chartreuse"/></div>
+    {session && <TodayQueue queue={priorityQueue} openOpportunity={openOpportunity} />}
     <div className="discovery-shell">
       <FilterRail filters={filters} setFilters={setFilters} />
       <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches`}</p></div><button className="compact-btn" onClick={() => setFilters((f) => ({ ...f }))}><RefreshCw size={16}/> Refresh</button></div>{loading ? <CardSkeletons /> : <div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>}</section>
-      <AnimatePresence>{selected && <OpportunityPanel row={selected} onClose={onClose} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />}</AnimatePresence>
+      <OpportunityPanel row={selected} onClose={onClose} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />
     </div>
   </div>;
+}
+
+function TodayQueue({ queue, openOpportunity }) {
+  const items = queue?.items || [];
+  if (!items.length) return null;
+  const summary = queue?.summary || {};
+  const kindLabel = { act_now: 'ACT NOW', application: 'APPLICATION', strong_match: 'STRONG MATCH', evidence_gap: 'UNLOCK' };
+  return <section className="today-queue"><div className="today-head"><div><span className="eyebrow">Your Radar today</span><h2>What deserves attention now</h2></div><div className="today-summary"><span><strong>{summary.actNow || 0}</strong> urgent</span><span><strong>{summary.strongMatches || 0}</strong> strong matches</span><span><strong>{summary.evidenceGaps || 0}</strong> unlockable</span></div></div><div className="today-items">{items.slice(0,4).map((item) => <button key={`${item.kind}-${item.opportunity?.id}`} className={cx('today-item', item.urgency)} onClick={() => openOpportunity(item.opportunity?.id)}><span className="today-kind">{kindLabel[item.kind] || 'NEXT'}</span><strong>{item.opportunity?.title || item.title}</strong><p>{item.title}</p><small>{item.reason}</small><div><span>{item.action}</span><ArrowUpRight size={15}/></div></button>)}</div></section>;
 }
 
 function FilterRail({ filters, setFilters }) {
@@ -317,9 +388,9 @@ function FilterRail({ filters, setFilters }) {
 }
 
 function OpportunityCard({ row, tone, active, onClick }) {
-  const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row);
+  const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row); const decision = decisionAssessment(row);
   return <motion.button className={cx('opportunity-card', `tone-${tone}`, active && 'selected')} onClick={onClick} whileHover={{ y: -5, scale: 1.005 }} transition={spring} layout>
-    <div className="card-topline"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><button className="bookmark-dot" tabIndex={-1}>{row.saved ? <BookmarkCheck size={15}/> : <Bookmark size={15}/>}</button></div>
+    <div className="card-topline"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><div className="card-top-actions">{decision && <span className={cx('decision-mini', decision.tone)}>{decision.label}</span>}<span className="bookmark-dot" tabIndex={-1}>{row.saved ? <BookmarkCheck size={15}/> : <Bookmark size={15}/>}</span></div></div>
     <div className="card-company">{row.organization || 'Organisation not listed'}</div><h3>{row.title}</h3>
     <div className="card-tags">{row.type && <span>{row.type}</span>}{row.remote && <span>Remote</span>}{row.country && <span>{row.country}</span>}</div>
     <p>{row.summary || row.description || 'Open the opportunity for full details.'}</p>
@@ -331,11 +402,17 @@ function CardSkeletons() { return <div className="opportunity-grid">{Array.from(
 function OpportunityPanel({ row, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
   useEffect(() => { if (!row) return undefined; const key = (event) => { if (event.key === 'Escape') onClose?.(); }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [row, onClose]);
   if (!row) return null;
-  const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row); const source = safeUrl(row.sourceUrl); const evidence = row.fitEvidence || {};
-  return <><motion.button className="detail-scrim" aria-label="Close opportunity details" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}/><motion.aside className="opportunity-panel detail-drawer" role="dialog" aria-modal="true" aria-label={row.title || 'Opportunity details'} initial={{ opacity: 0, y: 22, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: .99 }} transition={{ duration: .18 }}><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={18}/></button><div className="detail-scroll"><div className="detail-kicker"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><span>{row.type || 'Opportunity'}</span></div><h2>{row.title}</h2><p className="detail-org"><Building2 size={15}/>{row.organization || 'Organisation'} · {row.country || 'Location not listed'}</p>
+  const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row); const source = safeUrl(row.sourceUrl); const evidence = row.fitEvidence || {}; const decision = decisionAssessment(row);
+  return <><motion.button className="detail-scrim" aria-label="Close opportunity details" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}/><motion.aside className="opportunity-panel detail-drawer" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={spring}><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={18}/></button><div className="detail-scroll"><div className="detail-kicker"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><span>{row.type || 'Opportunity'}</span></div><h2>{row.title}</h2><p className="detail-org"><Building2 size={15}/>{row.organization || 'Organisation'} · {row.country || 'Location not listed'}</p>
+    {decision && <section className={cx('decision-scorecard', decision.tone)}>
+      <div className="decision-lead"><div><span className="decision-kicker">RADAR DECISION</span><strong>{decision.label}</strong><small>{decision.score}/100 decision score</small></div><div className="decision-effort"><span>Prep effort</span><strong>{decision.effort}</strong></div></div>
+      <div className="decision-dimensions"><div><span>Strategic fit</span><strong>{decision.fit}</strong></div><div><span>Eligibility</span><strong>{decision.eligibility}</strong></div><div><span>Evidence</span><strong>{decision.evidenceStrength}</strong></div><div><span>Runway</span><strong>{decision.deadlineFeasibility}</strong></div><div><span>Confidence</span><strong>{decision.confidence}</strong></div></div>
+      <div className="decision-guidance"><div><span>Main risk</span><p>{decision.primaryRisk}</p></div><div><span>Next best action</span><p>{decision.nextAction}</p></div></div>
+    </section>}
     <div className="detail-metrics"><div><CircleGauge/><strong>{row.fitScore == null ? '—' : `${Math.round(row.fitScore)}%`}</strong><small>fit score</small></div><div><CalendarDays/><strong>{deadlineLabel(row.deadline)}</strong><small>{fmtDate(row.deadline)}</small></div>{value && <div><CircleDollarSign/><strong>{value}</strong><small>stated value</small></div>}</div>
     <div className="detail-actions"><button className="button gold" onClick={onWorkspace} disabled={busy === 'workspace-create'}>{busy === 'workspace-create' ? <LoaderCircle className="spin"/> : <BriefcaseBusiness/>}{row.workspace ? 'Open workspace' : 'Start application'}</button><button className="button ghost" onClick={onSave}>{row.saved ? <BookmarkCheck/> : <Bookmark/>}{row.saved ? 'Saved' : 'Save'}</button></div>
-    <div className="ai-action-grid"><button onClick={() => onAI('fit')}><Sparkles/><span><strong>Explain my fit</strong><small>Grounded in your evidence</small></span></button><button onClick={() => onAI('brief')}><FileCheck2/><span><strong>Prepare brief</strong><small>Requirements + next action</small></span></button></div>
+    <div className="ai-action-grid"><button onClick={() => onAI('eligibility')} disabled={busy === 'opp-eligibility'}>{busy === 'opp-eligibility' ? <LoaderCircle className="spin"/> : <ShieldCheck/>}<span><strong>Check eligibility</strong><small>Met, gaps & blockers</small></span></button><button onClick={() => onAI('brief')} disabled={busy === 'opp-brief'}>{busy === 'opp-brief' ? <LoaderCircle className="spin"/> : <FileCheck2/>}<span><strong>Prepare brief</strong><small>Requirements + next action</small></span></button></div>
+    {row.eligibilityResult?.requirements?.length > 0 && <section className="eligibility-matrix"><div className="eligibility-head"><div><ShieldCheck/><span><strong>Eligibility check</strong><small>{row.eligibilityResult.requirements.length} decision-critical requirements</small></span></div><span className={cx('decision-mini', row.eligibilityResult.decision === 'pursue' ? 'pursue' : row.eligibilityResult.decision === 'skip' ? 'skip' : 'consider')}>{String(row.eligibilityResult.decision || 'consider').toUpperCase()}</span></div><div className="eligibility-list">{row.eligibilityResult.requirements.map((item, i) => <article key={`${item.requirement}-${i}`}><span className={cx('eligibility-status', item.status)}>{eligibilityStatusLabel(item.status)}</span><div><strong>{item.requirement}</strong>{item.evidence && <p>{item.evidence}</p>}{item.action && <small>{item.action}</small>}</div></article>)}</div></section>}
     {row.aiResult && <div className="ai-result"><div><BrainCircuit size={17}/><strong>Radar AI</strong></div><p>{row.aiResult}</p></div>}
     {session && row.fitScore != null && <div className="evidence-grid"><div><span>Confidence</span><strong>{Math.round(Number(evidence.confidence ?? .5) * 100)}%</strong></div><div><span>Direct matches</span><strong>{(evidence.keySkillMatches || []).length}</strong></div><div><span>Evidence gaps</span><strong>{(evidence.missingRequirements || []).length}</strong></div></div>}
     {(evidence.hardConstraints || []).length > 0 && <InfoBox tone="warning" icon={AlertTriangle} title="Hard constraints" text={evidence.hardConstraints.join(' · ')} />}
@@ -382,10 +459,16 @@ function ApplicationsView({ session, applications, onAuth }) {
   return <div><PageTitle eyebrow="Outcome pipeline" title="Know what is moving." copy="A clean view of planning, submitted work and progression—so Radar can eventually learn what converts."/><div className="stats-row"><StatCard icon={BriefcaseBusiness} label="Tracked" value={applications.length} note="pipeline records" tone="navy"/><StatCard icon={Send} label="Submitted" value={submitted.length} note="recorded applications" tone="gold"/><StatCard icon={MessageSquareText} label="Interviews" value={interviews.length} note="progressed" tone="teal"/><StatCard icon={CheckCircle2} label="Offers" value={offers.length} note="positive outcomes" tone="chartreuse"/></div><div className="pipeline-board">{[['planning','Planning'],['applied','Submitted'],['progress','Progressed']].map(([key,label]) => { const rows = key === 'progress' ? applications.filter((x) => ['interview','offer'].includes(x.status)) : applications.filter((x) => x.status === key); return <section key={key}><div className="pipeline-head"><strong>{label}</strong><span>{rows.length}</span></div>{rows.map((x) => <article key={x.id}><span className={cx('status-chip', x.status)}>{statusLabel(x.status)}</span><h3>{x.opportunity?.title || 'Opportunity'}</h3><p>{x.opportunity?.organization || ''}</p><small>{x.notes || 'No notes yet.'}</small></article>)}</section>; })}</div></div>;
 }
 
-function DocumentsView({ session, documents, addDocument, deleteDocument, extractEvidence, onAuth }) {
+function DocumentsView({ session, documents, evidenceHealth, addDocument, deleteDocument, extractEvidence, onAuth }) {
   const [open, setOpen] = useState(false);
   if (!session) return <LockedState onAuth={onAuth} title="Build a reusable evidence library" />;
-  return <div><PageTitle eyebrow="Reusable evidence" title="Golden documents." copy="Keep your best CVs, bios, references, certificates and capability evidence ready for grounded drafting." action={<button className="button dark" onClick={() => setOpen(!open)}><Plus/> Add document</button>} />{open && <DocumentForm onSubmit={async (p) => { await addDocument(p); setOpen(false); }}/>}<div className="document-library">{documents.map((d, i) => <motion.article key={d.id} className={cx('library-card', `tone-${CARD_TONES[i % CARD_TONES.length]}`)} whileHover={{ y: -4 }}><div className="library-icon"><Files/></div><div className="library-top"><span className="status-chip">{d.category}</span><button onClick={() => deleteDocument(d.id)}><Trash2/></button></div><h3>{d.title}</h3><p>{d.fileName || 'Stored text evidence'}</p><div className="library-meta"><span>{d.hasContent ? 'AI-ready' : 'Metadata only'}</span><span>Updated {fmtDate(d.updatedAt)}</span></div><button className="text-action" onClick={() => extractEvidence(d.id)}><Sparkles/> Extract reusable evidence <ChevronRight/></button></motion.article>)}{documents.length === 0 && <div className="empty-grid-card">No golden documents yet.</div>}</div></div>;
+  return <div><PageTitle eyebrow="Reusable evidence" title="Evidence Vault." copy="Keep proof ready, see what your documents actually cover, and close recurring evidence gaps before the next deadline." action={<button className="button dark" onClick={() => setOpen(!open)}><Plus/> Add document</button>} />
+    {evidenceHealth && <EvidenceHealthPanel health={evidenceHealth} />}
+    {open && <DocumentForm onSubmit={async (p) => { await addDocument(p); setOpen(false); }}/>}<div className="document-library">{documents.map((d, i) => <motion.article key={d.id} className={cx('library-card', `tone-${CARD_TONES[i % CARD_TONES.length]}`)} whileHover={{ y: -4 }}><div className="library-icon"><Files/></div><div className="library-top"><span className="status-chip">{d.category}</span><button onClick={() => deleteDocument(d.id)}><Trash2/></button></div><h3>{d.title}</h3><p>{d.fileName || 'Stored text evidence'}</p><div className="library-meta"><span>{d.hasContent ? 'AI-ready' : 'Metadata only'}</span><span>{d.verificationStatus === 'machine_extracted' ? 'Evidence extracted' : d.verificationStatus === 'verified' ? 'Verified' : 'Needs extraction'}</span></div><button className="text-action" onClick={() => extractEvidence(d.id)}><Sparkles/> Extract reusable evidence <ChevronRight/></button></motion.article>)}{documents.length === 0 && <div className="empty-grid-card">No evidence documents yet. Add a CV, capability statement, reference, certificate or past proposal to make Radar's eligibility decisions stronger.</div>}</div></div>;
+}
+function EvidenceHealthPanel({ health }) {
+  const t = health.totals || {}; const c = health.coverage || {}; const gaps = health.unresolvedGaps || [];
+  return <section className="evidence-health"><div className="evidence-health-score"><CircleGauge/><div><span>Evidence readiness</span><strong>{health.score}%</strong><small>{health.score >= 75 ? 'Strong reusable evidence base' : health.score >= 50 ? 'Useful, but important proof is still missing' : 'Build the evidence base before high-value applications'}</small></div></div><div className="evidence-health-metrics"><div><span>AI-ready docs</span><strong>{t.aiReady || 0}</strong></div><div><span>Extracted</span><strong>{t.extracted || 0}</strong></div><div><span>Reusable claims</span><strong>{t.claims || 0}</strong></div><div><span>Tracked gaps</span><strong>{c.unresolved || 0}</strong></div></div><div className="evidence-gap-list"><div className="evidence-gap-head"><strong>Evidence Radar keeps seeing as missing</strong><small>{c.likelyCovered || 0} gaps already have likely supporting evidence</small></div>{gaps.length ? gaps.slice(0,4).map((gap, i) => <article key={`${gap.requirement}-${i}`}><div><span>{gap.occurrences}×</span><strong>{gap.requirement}</strong></div><small>{gap.opportunities?.[0]?.title ? `Appears in ${gap.opportunities[0].title}` : 'Recurring opportunity requirement'}</small></article>) : <div className="evidence-clear"><CheckCircle2/> No recurring unresolved evidence gaps detected in your current strong matches.</div>}</div></section>;
 }
 function DocumentForm({ onSubmit }) {
   const [form, setForm] = useState({ title: '', category: 'cv', content: '' }); const [file, setFile] = useState(null);
