@@ -21,6 +21,38 @@ const prisma = new PrismaClient();
 type ScraperCtor = new (config: { sourceId: string }) => BaseScraper;
 
 export class ScraperManager {
+  private cadenceClass(definition: any): 'hot' | 'normal' | 'slow' {
+    const name = String(definition?.name || '');
+    const adapter = String(definition?.adapter || '');
+    if (['JobsToApply.com','BrighterMonday Uganda','Impactpool','EURAXESS Jobs & Research Opportunities'].includes(name)) return 'hot';
+    if (['rss','worldbank','ugandagpp'].includes(adapter) || /Procurement|Jobs|Opportunity Desk|Opportunities for Africans/i.test(name)) return 'normal';
+    return 'slow';
+  }
+
+  private baseCadenceMinutes(source: any): number {
+    const config = source?.config && typeof source.config === 'object' ? source.config as any : {};
+    const explicit = Number(config.cadenceMinutes || 0);
+    if (explicit > 0) return Math.max(15, Math.min(10080, explicit));
+    const frequency = String(source.frequency || 'normal').toLowerCase();
+    if (frequency === 'hot') return 30;
+    if (frequency === 'normal') return 180;
+    if (frequency === 'slow') return 720;
+    if (frequency === 'hourly') return 60;
+    if (frequency === 'weekly') return 10080;
+    return 720;
+  }
+
+  private effectiveCadenceMinutes(source: any, recentRuns: any[] = []): number {
+    let minutes = this.baseCadenceMinutes(source);
+    const completed = recentRuns.filter((run) => ['success','partial','failed'].includes(String(run.status || '')));
+    const recentSuccesses = completed.filter((run) => run.status !== 'failed');
+    const last = completed[0];
+    const dry = recentSuccesses.slice(0, 4).length >= 3 && recentSuccesses.slice(0, 4).every((run) => Number(run.inserted || 0) === 0);
+    if (Number(source.errorCount || 0) >= 3 || completed.slice(0, 2).some((run) => run.status === 'failed')) minutes = Math.min(1440, minutes * 4);
+    else if (dry) minutes = Math.min(1440, Math.round(minutes * 1.75));
+    else if (last && Number(last.inserted || 0) > 0) minutes = Math.max(15, Math.round(minutes * .75));
+    return minutes;
+  }
   async ensureDefaultSources(): Promise<void> {
     const searchAvailable = Boolean(process.env.BRAVE_SEARCH_API_KEY || process.env.SERPER_API_KEY);
     const linkedInAvailable = Boolean(process.env.LINKEDIN_API_ENDPOINT && process.env.LINKEDIN_API_KEY);
@@ -57,8 +89,8 @@ export class ScraperManager {
             baseUrl: definition.baseUrl || `https://${definition.domain}`,
             active,
             type: definition.defaultType || (adapter === 'rss' ? 'job' : 'consultancy'),
-            frequency: definition.frequency || 'daily',
-            config,
+            frequency: this.cadenceClass(definition),
+            config: { ...config, cadenceMinutes: this.cadenceClass(definition) === 'hot' ? 30 : this.cadenceClass(definition) === 'normal' ? 180 : 720 },
           },
         });
       } else {
@@ -68,8 +100,8 @@ export class ScraperManager {
             baseUrl: definition.baseUrl || `https://${definition.domain}`,
             active,
             type: definition.defaultType || (adapter === 'rss' ? 'job' : 'consultancy'),
-            frequency: definition.frequency || 'daily',
-            config,
+            frequency: this.cadenceClass(definition),
+            config: { ...config, cadenceMinutes: this.cadenceClass(definition) === 'hot' ? 30 : this.cadenceClass(definition) === 'normal' ? 180 : 720 },
           },
         });
       }
@@ -80,30 +112,34 @@ export class ScraperManager {
     const broadConfig = { adapter: 'search', scanProfile: 'all', domains: [], trust: 'secondary', coverage: 'long-tail-web' };
     const broad = await prisma.scraperSource.findFirst({ where: { name: broadName } });
     if (broad) {
-      await prisma.scraperSource.update({ where: { id: broad.id }, data: { active: searchAvailable, baseUrl: 'https://radar.tukutuku.org/discovery', frequency: 'daily', config: broadConfig } });
+      await prisma.scraperSource.update({ where: { id: broad.id }, data: { active: searchAvailable, baseUrl: 'https://radar.tukutuku.org/discovery', frequency: 'normal', config: { ...broadConfig, cadenceMinutes: 180 } } });
     } else {
-      await prisma.scraperSource.create({ data: { name: broadName, baseUrl: 'https://radar.tukutuku.org/discovery', type: 'consultancy', frequency: 'daily', active: searchAvailable, config: broadConfig } });
+      await prisma.scraperSource.create({ data: { name: broadName, baseUrl: 'https://radar.tukutuku.org/discovery', type: 'consultancy', frequency: 'normal', active: searchAvailable, config: { ...broadConfig, cadenceMinutes: 180 } } });
     }
   }
 
-  private isDue(source: any, now = new Date()): boolean {
+  private isDue(source: any, recentRuns: any[] = [], now = new Date()): boolean {
     if (!source.lastRun) return true;
-    const elapsed = now.getTime() - new Date(source.lastRun).getTime();
-    const frequency = String(source.frequency || 'daily').toLowerCase();
-    const threshold = frequency === 'hourly' ? 60 * 60 * 1000
-      : frequency === 'weekly' ? 7 * 24 * 60 * 60 * 1000
-      : 24 * 60 * 60 * 1000;
-    return elapsed >= threshold * 0.92;
+    const elapsedMinutes = (now.getTime() - new Date(source.lastRun).getTime()) / 60000;
+    return elapsedMinutes >= this.effectiveCadenceMinutes(source, recentRuns) * .92;
   }
 
-  async runAll(): Promise<{
+  async runAll(options: { force?: boolean } = {}): Promise<{
     success: boolean;
     results: Array<{ scraperName: string; success: boolean; scraped: number; inserted: number; duplicates: number; errors: number }>;
   }> {
     await this.ensureDefaultSources();
     console.log('[ScraperManager] Starting due Radar scans...');
     const allSources = await prisma.scraperSource.findMany({ where: { active: true } });
-    const sources = allSources.filter((source) => this.isDue(source));
+    const recentRuns = await prisma.scrapeRun.findMany({
+      where: { sourceId: { in: allSources.map((source) => source.id) } },
+      orderBy: { startedAt: 'desc' },
+      take: Math.max(80, allSources.length * 5),
+    });
+    const bySource = new Map<string, any[]>();
+    for (const run of recentRuns) { const rows = bySource.get(run.sourceId) || []; if (rows.length < 5) rows.push(run); bySource.set(run.sourceId, rows); }
+    const sources = options.force ? allSources : allSources.filter((source) => this.isDue(source, bySource.get(source.id) || []));
+    console.log(`[ScraperManager] ${sources.length}/${allSources.length} active sources due${options.force ? ' (forced)' : ''}.`);
     const results: Array<{ scraperName: string; success: boolean; scraped: number; inserted: number; duplicates: number; errors: number }> = [];
     let overallSuccess = true;
 
@@ -212,14 +248,15 @@ export class ScraperManager {
 
   async resetErrors(sourceId: string): Promise<void> { await prisma.scraperSource.update({ where: { id: sourceId }, data: { errorCount: 0 } }); }
 
-  async getSchedule(): Promise<Array<{ name: string; frequency: string; nextRun: Date }>> {
+  async getSchedule(): Promise<Array<{ name: string; frequency: string; cadenceMinutes: number; nextRun: Date }>> {
     const sources = await prisma.scraperSource.findMany({ where: { active: true } });
+    const recentRuns = await prisma.scrapeRun.findMany({ where: { sourceId: { in: sources.map((source) => source.id) } }, orderBy: { startedAt: 'desc' }, take: Math.max(80, sources.length * 5) });
+    const bySource = new Map<string, any[]>();
+    for (const run of recentRuns) { const rows = bySource.get(run.sourceId) || []; if (rows.length < 5) rows.push(run); bySource.set(run.sourceId, rows); }
     return sources.map((source) => {
-      const nextRun = new Date(source.lastRun || new Date());
-      if (source.frequency === 'hourly') nextRun.setHours(nextRun.getHours() + 1);
-      else if (source.frequency === 'weekly') nextRun.setDate(nextRun.getDate() + 7);
-      else nextRun.setDate(nextRun.getDate() + 1);
-      return { name: source.name, frequency: source.frequency, nextRun };
+      const cadenceMinutes = this.effectiveCadenceMinutes(source, bySource.get(source.id) || []);
+      const nextRun = new Date((source.lastRun || new Date()).getTime() + cadenceMinutes * 60000);
+      return { name: source.name, frequency: source.frequency, cadenceMinutes, nextRun };
     });
   }
 }
