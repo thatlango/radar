@@ -248,7 +248,7 @@ function App() {
       <Topbar filters={filters} setFilters={setFilters} session={session} onAuth={() => setAuthOpen(true)} onLogout={logout} unread={unread} onNotifications={() => setView('profile')} onAI={() => setAiOpen(true)} onMobile={() => setMobileNav(true)} />
       <main className="page-stage">
         <AnimatePresence mode="wait">
-          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} selected={selected} filters={filters} setFilters={setFilters} openOpportunity={openOpportunity} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
+          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} selected={selected} filters={filters} setFilters={setFilters} openOpportunity={openOpportunity} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'workspace' && <motion.div key="workspace" {...pageMotion}><WorkspaceView session={session} workspaces={workspaces} workspace={workspace} openWorkspace={openWorkspace} activeDocId={activeDocId} setActiveDocId={setActiveDocId} generatePlan={generatePlan} saveDocument={saveDocument} aiDraftDocument={aiDraftDocument} aiReviewDocument={aiReviewDocument} addMember={addMember} addComment={addComment} finalizeWorkspace={finalizeWorkspace} recordSubmission={recordSubmission} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'applications' && <motion.div key="applications" {...pageMotion}><ApplicationsView session={session} applications={applications} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'documents' && <motion.div key="documents" {...pageMotion}><DocumentsView session={session} documents={documents} addDocument={addLibraryDocument} deleteDocument={deleteDocument} extractEvidence={extractEvidence} onAuth={() => setAuthOpen(true)} /></motion.div>}
@@ -260,7 +260,7 @@ function App() {
     </div>
     <AuthModal open={authOpen} setOpen={setAuthOpen} mode={authMode} setMode={setAuthMode} onSuccess={async () => { setAuthOpen(false); await loadSession(); notify('Welcome to Radar.'); }} notify={notify} />
     <AIDrawer open={aiOpen} setOpen={setAiOpen} messages={aiMessages} onAsk={askAI} context={workspace?.opportunity?.title || selected?.title || 'General Radar context'} />
-    <AnimatePresence>{toast && <motion.div className="toast" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
+    <AnimatePresence>{toast && <motion.div className="toast" initial={{ y: 40, opacity: 0 }} animate={{ opacity: 1, y: 0 }} exit={{ y: 20, opacity: 0 }}>{toast}</motion.div>}</AnimatePresence>
   </div>;
 }
 
@@ -291,14 +291,14 @@ function Topbar({ filters, setFilters, session, onAuth, onLogout, unread, onNoti
 function PageTitle({ eyebrow, title, copy, action }) { return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></div>{action}</div>; }
 function StatCard({ icon: Icon, label, value, note, tone = 'navy' }) { return <motion.article className={cx('stat-card', tone)} whileHover={{ y: -3 }} transition={spring}><div className="stat-icon"><Icon size={18} /></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></motion.article>; }
 
-function DiscoveryView({ stats, opportunities, loading, selected, filters, setFilters, openOpportunity, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
+function DiscoveryView({ stats, opportunities, loading, selected, filters, setFilters, openOpportunity, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
   return <div>
     <PageTitle eyebrow="Opportunity intelligence" title="Find work worth chasing." copy="A live, verified feed ranked around fit, timing and evidence—not an endless job board." action={<div className="hero-chip"><ShieldCheck size={17} /> Verified live feed</div>} />
     <div className="stats-row"><StatCard icon={Target} label="Live opportunities" value={Number(stats?.live || 0).toLocaleString()} note="currently open" tone="gold"/><StatCard icon={Globe2} label="Remote" value={Number(stats?.remote || 0).toLocaleString()} note="location-flexible" tone="teal"/><StatCard icon={Clock3} label="Closing soon" value={Number(stats?.closingSoon || 0).toLocaleString()} note="within 14 days" tone="pumpkin"/><StatCard icon={ShieldCheck} label="Active sources" value={Number(stats?.activeSources || 0).toLocaleString()} note="scanning now" tone="chartreuse"/></div>
     <div className="discovery-shell">
       <FilterRail filters={filters} setFilters={setFilters} />
       <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches`}</p></div><button className="compact-btn" onClick={() => setFilters((f) => ({ ...f }))}><RefreshCw size={16}/> Refresh</button></div>{loading ? <CardSkeletons /> : <div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>}</section>
-      <OpportunityPanel row={selected} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />
+      <AnimatePresence>{selected && <OpportunityPanel row={selected} onClose={onClose} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />}</AnimatePresence>
     </div>
   </div>;
 }
@@ -328,10 +328,11 @@ function OpportunityCard({ row, tone, active, onClick }) {
 }
 function CardSkeletons() { return <div className="opportunity-grid">{Array.from({ length: 6 }).map((_, i) => <div className="skeleton-card" key={i}><i/><i/><i/><i/></div>)}</div>; }
 
-function OpportunityPanel({ row, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
-  if (!row) return <aside className="opportunity-panel empty-detail"><div className="detail-target"><Target size={28}/></div><h3>Select an opportunity</h3><p>Open a card to review fit, evidence gaps, source confidence and next actions.</p></aside>;
+function OpportunityPanel({ row, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
+  useEffect(() => { if (!row) return undefined; const key = (event) => { if (event.key === 'Escape') onClose?.(); }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [row, onClose]);
+  if (!row) return null;
   const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row); const source = safeUrl(row.sourceUrl); const evidence = row.fitEvidence || {};
-  return <aside className="opportunity-panel"><div className="detail-scroll"><div className="detail-kicker"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><span>{row.type || 'Opportunity'}</span></div><h2>{row.title}</h2><p className="detail-org"><Building2 size={15}/>{row.organization || 'Organisation'} · {row.country || 'Location not listed'}</p>
+  return <><motion.button className="detail-scrim" aria-label="Close opportunity details" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}/><motion.aside className="opportunity-panel detail-drawer" role="dialog" aria-modal="true" aria-label={row.title || 'Opportunity details'} initial={{ opacity: 0, y: 22, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: .99 }} transition={{ duration: .18 }}><button className="drawer-close" onClick={onClose} aria-label="Close"><X size={18}/></button><div className="detail-scroll"><div className="detail-kicker"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><span>{row.type || 'Opportunity'}</span></div><h2>{row.title}</h2><p className="detail-org"><Building2 size={15}/>{row.organization || 'Organisation'} · {row.country || 'Location not listed'}</p>
     <div className="detail-metrics"><div><CircleGauge/><strong>{row.fitScore == null ? '—' : `${Math.round(row.fitScore)}%`}</strong><small>fit score</small></div><div><CalendarDays/><strong>{deadlineLabel(row.deadline)}</strong><small>{fmtDate(row.deadline)}</small></div>{value && <div><CircleDollarSign/><strong>{value}</strong><small>stated value</small></div>}</div>
     <div className="detail-actions"><button className="button gold" onClick={onWorkspace} disabled={busy === 'workspace-create'}>{busy === 'workspace-create' ? <LoaderCircle className="spin"/> : <BriefcaseBusiness/>}{row.workspace ? 'Open workspace' : 'Start application'}</button><button className="button ghost" onClick={onSave}>{row.saved ? <BookmarkCheck/> : <Bookmark/>}{row.saved ? 'Saved' : 'Save'}</button></div>
     <div className="ai-action-grid"><button onClick={() => onAI('fit')}><Sparkles/><span><strong>Explain my fit</strong><small>Grounded in your evidence</small></span></button><button onClick={() => onAI('brief')}><FileCheck2/><span><strong>Prepare brief</strong><small>Requirements + next action</small></span></button></div>
@@ -342,7 +343,7 @@ function OpportunityPanel({ row, onSave, onAI, onWorkspace, onTrack, busy, sessi
     <DetailSection title="Opportunity overview"><p>{row.description || row.summary || 'No description available.'}</p></DetailSection>{row.requirements && <DetailSection title="Technical requirements"><p>{row.requirements}</p></DetailSection>}
     <DetailSection title="Source confidence">{source ? <a className="source-link" href={source} target="_blank" rel="noreferrer"><ShieldCheck/><span><strong>{row.source || 'Original source'}</strong><small>Open verified listing</small></span><ExternalLink/></a> : <p>Source URL unavailable.</p>}</DetailSection>
     <div className="track-box"><strong>Application status</strong><div className="track-actions"><button onClick={() => session ? onTrack('planning') : onAuth()}>Planning</button><button onClick={() => session ? onTrack('applied') : onAuth()}>Applied</button><button onClick={() => session ? onTrack('interview') : onAuth()}>Interview</button></div></div>
-  </div></aside>;
+  </div></motion.aside></>;
 }
 function DetailSection({ title, children }) { return <section className="detail-section"><h4>{title}</h4>{children}</section>; }
 function InfoBox({ tone, icon: Icon, title, text }) { return <div className={cx('info-box', tone)}><Icon/><div><strong>{title}</strong><p>{text}</p></div></div>; }
