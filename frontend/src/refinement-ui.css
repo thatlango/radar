@@ -1,0 +1,142 @@
+/* ========================================================================== 
+   RADAR UI REFINEMENT
+   Final-pass overrides loaded after pop-ui.css.
+   ========================================================================== */
+
+/* Opportunity cards: remove the boxy outline and separate with soft elevation. */
+.opportunity-card {
+  border: 0 !important;
+  box-shadow: 0 3px 12px rgba(20, 36, 58, .055) !important;
+}
+
+.opportunity-card:hover {
+  border: 0 !important;
+  box-shadow: 0 12px 28px rgba(20, 36, 58, .10) !important;
+}
+
+.opportunity-card.selected {
+  border: 0 !important;
+  box-shadow: 0 0 0 2px rgba(0, 125, 111, .18), 0 14px 30px rgba(20, 36, 58, .10) !important;
+}
+
+.feed-column,
+.filter-rail,
+.opportunity-panel,
+.surface-panel,
+.settings-card,
+.document-form,
+.current-plan,
+.plan-card,
+.workspace-list,
+.stage-rail {
+  border: 0 !important;
+}
+
+/* Detail summary metrics: strong semantic colour with white typography. */
+.detail-metrics {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+  margin: 18px 0 20px !important;
+}
+
+.detail-metrics > div {
+  min-height: 104px !important;
+  padding: 14px 14px 13px !important;
+  border: 0 !important;
+  border-radius: 16px !important;
+  color: #fff !important;
+  box-shadow: 0 7px 18px rgba(20, 36, 58, .10) !important;
+}
+
+.detail-metrics > div:nth-child(1) {
+  background: linear-gradient(135deg, #173247 0%, #244b67 100%) !important;
+}
+
+.detail-metrics > div:nth-child(2) {
+  background: linear-gradient(135deg, #007d6f 0%, #119b89 100%) !important;
+}
+
+.detail-metrics > div:nth-child(3) {
+  background: linear-gradient(135deg, #b75a1d 0%, #e27625 100%) !important;
+}
+
+.detail-metrics svg,
+.detail-metrics strong,
+.detail-metrics small {
+  color: #fff !important;
+}
+
+.detail-metrics svg {
+  opacity: .94;
+}
+
+.detail-metrics strong {
+  margin-top: 16px !important;
+  font-size: 14px !important;
+  line-height: 1.2 !important;
+  font-weight: 800 !important;
+}
+
+.detail-metrics small {
+  margin-top: 4px !important;
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+  opacity: .82;
+}
+
+/* Hero: one line on genuinely large displays; responsive wrapping below that. */
+.page-title {
+  align-items: flex-end !important;
+  gap: 28px !important;
+}
+
+.page-title > div:first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+.page-title h1 {
+  max-width: none !important;
+  letter-spacing: -.045em !important;
+  line-height: 1.01 !important;
+}
+
+.page-title p {
+  max-width: 1040px !important;
+}
+
+.hero-chip {
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+}
+
+@media (min-width: 1500px) {
+  .page-title h1 {
+    white-space: nowrap !important;
+    font-size: clamp(46px, 3.2vw, 62px) !important;
+  }
+}
+
+@media (min-width: 1800px) {
+  .page-title h1 {
+    font-size: clamp(52px, 3.05vw, 66px) !important;
+  }
+}
+
+@media (max-width: 1499px) {
+  .page-title h1 {
+    white-space: normal !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .detail-metrics {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .detail-metrics > div:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
