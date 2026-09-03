@@ -1,3 +1,69 @@
+const STRUCTURED_METADATA_KEYS = /(?:budgetYearsColumns|budgetTopicActions|expectedGrants|minContribution|maxContribution|aggregationField|facet|metadata|rawPayload|searchMetadata)/i;
+
+function normalizeDisplayText(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') return '';
+
+  let text = String(value)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text || text === '[object Object]' || text === '[object Array]') return '';
+
+  const startsStructured = /^[\[{]/.test(text);
+  if (startsStructured) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object') return '';
+    } catch {
+      if (STRUCTURED_METADATA_KEYS.test(text)) return '';
+    }
+  }
+
+  const structuredTail = text.search(/\s+[\[{]\s*["'][A-Za-z0-9_-]+["']\s*:/);
+  if (structuredTail > 40) text = text.slice(0, structuredTail).trim();
+
+  if (STRUCTURED_METADATA_KEYS.test(text) && /[\[{].*[:]/.test(text)) return '';
+  return text;
+}
+
+function normalizeScalarText(value) {
+  const text = normalizeDisplayText(value);
+  if (!text || text.length > 180) return '';
+  if (/[\[{].*[:]/.test(text)) return '';
+  return text;
+}
+
+function sanitizeOpportunity(row) {
+  if (!row || typeof row !== 'object') return row;
+  return {
+    ...row,
+    title: normalizeDisplayText(row.title) || 'Opportunity',
+    organization: normalizeDisplayText(row.organization) || 'Organisation not listed',
+    country: normalizeScalarText(row.country) || row.country || '',
+    region: normalizeScalarText(row.region),
+    summary: normalizeDisplayText(row.summary),
+    description: normalizeDisplayText(row.description),
+    requirements: normalizeDisplayText(row.requirements),
+    compensation: normalizeScalarText(row.compensation),
+    salary: normalizeScalarText(row.salary),
+    source: normalizeScalarText(row.source) || row.source || '',
+  };
+}
+
+function sanitizeOpportunityPayload(value) {
+  if (Array.isArray(value)) return value.map(sanitizeOpportunityPayload);
+  if (!value || typeof value !== 'object') return value;
+
+  const next = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, sanitizeOpportunityPayload(child)]),
+  );
+
+  if (next.sourceUrl && next.title && next.type) return sanitizeOpportunity(next);
+  return next;
+}
+
 export async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'same-origin',
@@ -16,7 +82,7 @@ export async function api(path, options = {}) {
     error.status = response.status;
     throw error;
   }
-  return body?.data ?? body;
+  return sanitizeOpportunityPayload(body?.data ?? body);
 }
 
 export const list = (value) => String(value || '').split(',').map((v) => v.trim()).filter(Boolean);
