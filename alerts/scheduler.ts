@@ -33,14 +33,34 @@ interface AlertOpportunity {
 }
 
 export class AlertSystem {
+  private scanRunning = false;
+
+  private async queueApplicationRechecks(limit = 200): Promise<number> {
+    const staleBefore = new Date(Date.now() - 14 * 86400000);
+    const rows = await prisma.opportunity.findMany({ where: { sourceStatus: 'live', OR: [{ applicationVerifiedAt: null }, { applicationVerifiedAt: { lt: staleBefore } }] }, select: { id: true }, orderBy: { applicationVerifiedAt: 'asc' }, take: limit });
+    for (const row of rows) await prisma.radarJob.upsert({ where: { dedupeKey: `resolve-application:${row.id}` }, create: { type: 'resolve_application', payload: { opportunityId: row.id }, dedupeKey: `resolve-application:${row.id}`, status: 'queued' }, update: { status: 'queued', runAt: new Date(), completedAt: null, lockedAt: null, lastError: null, attempts: 0 } }).catch(() => undefined);
+    return rows.length;
+  }
+
+  private async runOpportunityScan(label: string, force = false): Promise<void> {
+    if (this.scanRunning) { console.log(`[Radar] ${label} skipped: another source scan is still running`); return; }
+    this.scanRunning = true;
+    try {
+      console.log(`[Radar] ${label}${force ? ' (forced)' : ''}`);
+      const result = await scraperManager.runAll({ force });
+      const inserted = result.results.reduce((sum, item) => sum + Number(item.inserted || 0), 0);
+      const rechecks = force ? await this.queueApplicationRechecks() : 0;
+      console.log(`[Radar] ${label} completed: ${result.results.length} sources checked, ${inserted} new opportunities${force ? `, ${rechecks} application routes queued for re-check` : ''}`);
+    } catch (error) { console.error(`[Radar] ${label} failed`, error); }
+    finally { this.scanRunning = false; }
+  }
+
   setupScheduler(): void {
-    // Refresh the shared opportunity pool throughout the day so an 08:00/09:00 brief is never based on one stale crawl.
-    cron.schedule('15 */4 * * *', async () => {
-      try {
-        console.log('[Radar] running cross-source opportunity scan');
-        await scraperManager.runAll();
-      } catch (error) { console.error('[Radar] scan error', error); }
-    });
+    // Wake frequently; ScraperManager decides which adaptive source cadences are actually due.
+    cron.schedule('*/10 * * * *', async () => { await this.runOpportunityScan('adaptive opportunity scan'); });
+
+    // Nightly full reconciliation makes even slow sources prove freshness at least once per day.
+    cron.schedule('15 2 * * *', async () => { await this.runOpportunityScan('nightly full-source reconciliation', true); }, { timezone: 'Africa/Kampala' });
 
     // Check each user's local delivery hour. Users choose 08:00 or 09:00 in their own timezone.
     cron.schedule('5 * * * *', async () => {
@@ -72,6 +92,7 @@ export class AlertSystem {
     });
 
     console.log('[Radar] opportunity scan + briefing scheduler initialized');
+    void this.runOpportunityScan('startup due-source scan');
   }
 
   private prefs(user: any): any {

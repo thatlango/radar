@@ -105,6 +105,7 @@ export abstract class BaseScraper {
       });
       inserted = true;
     } else {
+      const previousDeadline = row.deadline;
       const richerDescription = String(opportunity.description || '').length > String(row.description || '').length ? opportunity.description : row.description;
       const richerRequirements = String(opportunity.requirements || '').length > String(row.requirements || '').length ? opportunity.requirements : row.requirements;
       row = await prisma.opportunity.update({
@@ -125,6 +126,13 @@ export abstract class BaseScraper {
           closedAt: null,
         },
       });
+      if (opportunity.deadline) {
+        const before = previousDeadline?.getTime() || null;
+        const after = new Date(opportunity.deadline).getTime();
+        if (before !== after) {
+          await prisma.systemLog.create({ data: { level: 'info', source: 'opportunity-change', message: `Deadline ${before ? 'changed' : 'added'} for ${opportunity.title}`.slice(0, 600), metadata: { kind: before ? 'deadline_changed' : 'deadline_added', opportunityId: row.id, previous: previousDeadline?.toISOString() || null, next: new Date(opportunity.deadline).toISOString(), sourceName } } }).catch(() => undefined);
+        }
+      }
     }
     await prisma.opportunitySource.upsert({
       where: { sourceUrl: opportunity.sourceUrl },

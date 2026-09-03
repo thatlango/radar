@@ -327,6 +327,35 @@ function opportunityPresentation(row) {
   return { title, officialTitle: cleanOpportunityText(row.title), summary: conciseOpportunitySummary(row, title) };
 }
 
+function opportunityFreshness(row) {
+  const now = Date.now();
+  const discovered = new Date(row?.discoveredAt || row?.createdAt || 0).getTime();
+  const verified = new Date(row?.lastVerifiedAt || 0).getTime();
+  const ageHours = Number.isFinite(discovered) && discovered > 0 ? Math.max(0, (now - discovered) / 3600000) : null;
+  const verifiedHours = Number.isFinite(verified) && verified > 0 ? Math.max(0, (now - verified) / 3600000) : null;
+  const deadlineDays = row?.deadline ? Math.ceil((new Date(row.deadline).getTime() - now) / 86400000) : null;
+  if (row?.sourceStatus === 'stale' || row?.verificationStatus === 'needs_review') return { label: 'Needs re-check', tone: 'warn', ageHours };
+  if (deadlineDays !== null && deadlineDays >= 0 && deadlineDays <= 5) return { label: 'Closing soon', tone: 'urgent', ageHours };
+  if (ageHours !== null && ageHours <= 6) return { label: 'Just found', tone: 'new', ageHours };
+  if (ageHours !== null && ageHours <= 24) return { label: 'New today', tone: 'new', ageHours };
+  if (verifiedHours !== null && verifiedHours <= 24) return { label: 'Recently verified', tone: 'verified', ageHours };
+  return { label: 'In Radar', tone: 'neutral', ageHours };
+}
+function feedPriorityScore(row, fitScore) {
+  const fit = Math.max(0, Math.min(100, Number(fitScore || 0)));
+  const quality = Math.max(0, Math.min(100, Number(row?.qualityScore || 0)));
+  const ageHours = Math.max(0, (Date.now() - new Date(row?.discoveredAt || row?.createdAt || 0).getTime()) / 3600000);
+  const freshness = ageHours <= 6 ? 100 : ageHours <= 24 ? 86 : ageHours <= 72 ? 66 : ageHours <= 168 ? 46 : 25;
+  const days = row?.deadline ? Math.ceil((new Date(row.deadline).getTime() - Date.now()) / 86400000) : null;
+  const urgency = days === null ? 48 : days < 0 ? 0 : days <= 2 ? 68 : days <= 7 ? 96 : days <= 14 ? 86 : days <= 30 ? 70 : 50;
+  return Math.round(fit * .55 + quality * .15 + freshness * .15 + urgency * .15);
+}
+function feedSince(user) {
+  const raw = safePrefs(user).lastFeedSeenAt;
+  const parsed = raw ? new Date(raw) : null;
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date(Date.now() - 24 * 3600000);
+}
+
 function opportunityView(row, extra = {}) {
   const presentation = opportunityPresentation(row);
   return {
@@ -339,7 +368,7 @@ function opportunityView(row, extra = {}) {
     publishedAt: row.publishedAt, discoveredAt: row.discoveredAt, lastVerifiedAt: row.lastVerifiedAt, sourceStatus: row.sourceStatus,
     verificationStatus: row.verificationStatus, sourceCount: row._count?.sources ?? (Array.isArray(row.sources) ? row.sources.length : 1),
     sources: Array.isArray(row.sources) ? row.sources.map((source) => ({ name: source.sourceName, url: source.sourceUrl, status: source.status, lastVerifiedAt: source.lastVerifiedAt })) : undefined,
-    summary: presentation.summary, aiSummary: row.aiSummary, keywords: row.aiKeywords, qualityScore: row.qualityScore, createdAt: row.createdAt,
+    summary: presentation.summary, aiSummary: row.aiSummary, keywords: row.aiKeywords, qualityScore: row.qualityScore, freshness: opportunityFreshness(row), createdAt: row.createdAt,
     ...extra,
   };
 }
@@ -720,15 +749,19 @@ app.get('/api/opportunities', async (req, res, next) => {
     const saved = session ? new Set((await prisma.savedOpportunity.findMany({ where: { userId: session.userId }, select: { opportunityId: true } })).map((x) => x.opportunityId)) : new Set();
     const workspaceMap = session ? new Map((await prisma.opportunityWorkspace.findMany({ where: { userId: session.userId, opportunityId: { in: filtered.map((x) => x.id) } }, select: { id: true, opportunityId: true, status: true } })).map((x) => [x.opportunityId, x])) : new Map();
     const matches = session ? new Map((await prisma.match.findMany({ where: { userId: session.userId, opportunityId: { in: filtered.map((x) => x.id) } } })).map((x) => [x.opportunityId, x])) : new Map();
+    const lastFeedSeenAt = session ? feedSince(session.user) : null;
     const mapped = filtered.map((row) => {
       const match = matches.get(row.id);
+      const fitScore = match?.finalRank ?? (session ? deterministicFit(session.user, row) : null);
       return opportunityView(row, {
         saved: saved.has(row.id), workspace: workspaceMap.get(row.id) || null,
-        fitScore: match?.finalRank ?? (session ? deterministicFit(session.user, row) : null),
+        fitScore,
+        feedScore: session ? feedPriorityScore(row, fitScore) : null,
+        newToUser: Boolean(session && lastFeedSeenAt && new Date(row.discoveredAt || row.createdAt) > lastFeedSeenAt),
         fitEvidence: match ? { explanation: match.explanation, keySkillMatches: match.keySkillMatches || [], missingRequirements: match.missingRequirements || [], hardConstraints: match.hardConstraints || [], specialistNeeds: match.specialistNeeds || [], confidence: match.confidence } : null,
       });
     });
-    if (session) mapped.sort((a, b) => Number(b.fitScore || 0) - Number(a.fitScore || 0) || Number(b.qualityScore || 0) - Number(a.qualityScore || 0));
+    if (session) mapped.sort((a, b) => Number(b.feedScore || 0) - Number(a.feedScore || 0) || Number(b.fitScore || 0) - Number(a.fitScore || 0) || Number(b.qualityScore || 0) - Number(a.qualityScore || 0));
     const seenPresentation = new Set();
     const uniqueMapped = mapped.filter((item) => {
       const key = [item.title, item.organization, item.country, item.source].map((value) => cleanOpportunityText(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).join('|');
@@ -769,13 +802,59 @@ app.post('/api/internal/opportunities/reconcile-freshness', async (req, res) => 
 
 app.get('/api/stats', async (_req, res) => {
   const now = new Date();
-  const [live, remote, closingSoon, sources] = await Promise.all([
+  const sixHoursAgo = new Date(Date.now() - 6 * 3600000);
+  const oneDayAgo = new Date(Date.now() - 24 * 3600000);
+  const [live, remote, closingSoon, sourceRows, newLast6h] = await Promise.all([
     prisma.opportunity.count({ where: { OR: [{ deadline: null }, { deadline: { gte: now } }] } }),
     prisma.opportunity.count({ where: { remote: true, OR: [{ deadline: null }, { deadline: { gte: now } }] } }),
     prisma.opportunity.count({ where: { deadline: { gte: now, lte: new Date(Date.now() + 14 * 86400000) } } }),
-    prisma.scraperSource.count({ where: { active: true } }),
+    prisma.scraperSource.findMany({ where: { active: true }, select: { name: true, frequency: true, lastRun: true, lastSuccess: true } }),
+    prisma.opportunity.count({ where: { discoveredAt: { gte: sixHoursAgo }, sourceStatus: 'live' } }),
   ]);
-  res.json({ live, remote, closingSoon, activeSources: sources });
+  const lastScanAt = sourceRows.map((row) => row.lastRun?.getTime() || 0).reduce((a, b) => Math.max(a, b), 0);
+  res.json({
+    live, remote, closingSoon, activeSources: sourceRows.length,
+    feed: {
+      lastScanAt: lastScanAt ? new Date(lastScanAt) : null,
+      sourcesChecked24h: sourceRows.filter((row) => row.lastRun && row.lastRun >= oneDayAgo).length,
+      hotSources: sourceRows.filter((row) => row.frequency === 'hot').length,
+      newLast6h,
+    },
+  });
+});
+
+app.get('/api/me/feed-summary', requireSession, async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const since = feedSince(user);
+    const minFit = Math.max(0, Math.min(100, Number(safePrefs(user).minFitScore ?? 60)));
+    const matches = await prisma.match.findMany({
+      where: { userId: req.radarSession.userId, finalRank: { gte: minFit }, opportunity: { discoveredAt: { gt: since }, sourceStatus: 'live', OR: [{ deadline: null }, { deadline: { gte: new Date() } }] } },
+      include: { opportunity: { include: { _count: { select: { sources: true } } } } },
+      orderBy: { finalRank: 'desc' }, take: 200,
+    });
+    const [verifiedRoutes, changes] = await Promise.all([
+      prisma.match.count({ where: { userId: req.radarSession.userId, finalRank: { gte: minFit }, opportunity: { applicationVerifiedAt: { gt: since }, sourceStatus: 'live' } } }),
+      prisma.systemLog.findMany({ where: { source: 'opportunity-change', createdAt: { gt: since } }, orderBy: { createdAt: 'desc' }, take: 500 }),
+    ]);
+    const deadlineIds = [...new Set(changes.filter((log) => ['deadline_changed','deadline_added'].includes(String(log.metadata?.kind || ''))).map((log) => String(log.metadata?.opportunityId || '')).filter(Boolean))];
+    const matchedDeadlineChanges = deadlineIds.length ? await prisma.match.count({ where: { userId: req.radarSession.userId, finalRank: { gte: minFit }, opportunityId: { in: deadlineIds } } }) : 0;
+    res.json({
+      since,
+      counts: { newMatches: matches.length, strongMatches: matches.filter((item) => Number(item.finalRank) >= 72).length, applicationRoutesVerified: verifiedRoutes, deadlineChanges: matchedDeadlineChanges },
+      items: matches.slice(0, 8).map((match) => opportunityView(match.opportunity, { fitScore: match.finalRank, feedScore: feedPriorityScore(match.opportunity, match.finalRank), newToUser: true })),
+      checkedAt: new Date(),
+    });
+  } catch (error) { next(error); }
+});
+app.post('/api/me/feed-seen', requireSession, async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const seenAt = new Date();
+    const preferences = { ...safePrefs(user), lastFeedSeenAt: seenAt.toISOString() };
+    await prisma.user.update({ where: { id: req.radarSession.userId }, data: { preferences } });
+    res.json({ seenAt });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/me/priority-queue', requireSession, async (req, res, next) => {

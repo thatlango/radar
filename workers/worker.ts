@@ -36,7 +36,12 @@ async function execute(job: any): Promise<void> {
     const opportunity = await prisma.opportunity.findUnique({ where: { id: String(payload.opportunityId) } });
     if (!opportunity) return;
     const result = await resolveApplicationDestination(opportunity.sourceUrl, String(opportunity.title || '') + ' ' + String(opportunity.description || '') + ' ' + String(opportunity.requirements || ''));
-    await prisma.opportunity.update({ where: { id: opportunity.id }, data: { applicationUrl: result.applicationUrl || null, applicationEmail: result.applicationEmail || null, applicationInstructions: result.applicationInstructions || null, applicationVerifiedAt: new Date() } });
+    const hadRoute = Boolean(opportunity.applicationUrl || opportunity.applicationEmail);
+    const nextUrl = result.applicationUrl || opportunity.applicationUrl || null;
+    const nextEmail = result.applicationEmail || opportunity.applicationEmail || null;
+    const nextInstructions = result.applicationInstructions || opportunity.applicationInstructions || null;
+    await prisma.opportunity.update({ where: { id: opportunity.id }, data: { applicationUrl: nextUrl, applicationEmail: nextEmail, applicationInstructions: nextInstructions, applicationVerifiedAt: new Date() } });
+    if (!hadRoute && (nextUrl || nextEmail)) await prisma.systemLog.create({ data: { level: 'info', source: 'opportunity-change', message: `Application route verified for ${opportunity.title}`.slice(0, 600), metadata: { kind: 'application_route_verified', opportunityId: opportunity.id, applicationUrl: nextUrl, applicationEmail: nextEmail } } }).catch(() => undefined);
     return;
   }
   throw new Error(`Unsupported Radar job type: ${job.type}`);

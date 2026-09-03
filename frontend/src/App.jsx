@@ -89,6 +89,7 @@ function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pageInfo, setPageInfo] = useState({ nextCursor: null, hasMore: false });
   const [priorityQueue, setPriorityQueue] = useState(null);
+  const [feedPulse, setFeedPulse] = useState(null);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
@@ -125,6 +126,9 @@ function App() {
     catch { setSession(null); }
   }
   async function loadStats() { try { setStats(await api('/api/stats')); } catch { setStats(null); } }
+  async function loadFeedPulse() { if (!session) return setFeedPulse(null); try { setFeedPulse(await api('/api/me/feed-summary')); } catch { setFeedPulse(null); } }
+  async function refreshDiscovery(acknowledge = false) { await Promise.all([loadStats(), loadOpportunities(filters)]); if (acknowledge && session) { await api('/api/me/feed-seen', { method: 'POST', body: '{}' }).catch(() => null); await loadFeedPulse(); } }
+  async function showNewOpportunities() { await refreshDiscovery(true); notify('Radar feed refreshed with the latest matches.'); }
   async function loadOpportunities(next = filters, options = {}) {
     const append = options.append === true;
     append ? setLoadingMore(true) : setOpportunityLoading(true);
@@ -185,7 +189,8 @@ function App() {
     if (view === 'profile' && session) loadProfileBundle();
     if (view === 'subscription') loadPlans();
   }, [view, session]);
-  useEffect(() => { if (session) { loadNotifications(); loadPriorityQueue(); } else setPriorityQueue(null); }, [session]);
+  useEffect(() => { if (session) { loadNotifications(); loadPriorityQueue(); loadFeedPulse(); } else { setPriorityQueue(null); setFeedPulse(null); } }, [session]);
+  useEffect(() => { if (!session) return undefined; const timer = window.setInterval(loadFeedPulse, 5 * 60 * 1000); return () => window.clearInterval(timer); }, [session?.user?.id]);
   useEffect(() => {
     if (!session) return;
     const params = new URLSearchParams(window.location.search);
@@ -393,7 +398,7 @@ function App() {
       <Topbar filters={filters} onSearch={(q) => { setFilters((f) => ({ ...f, q })); if (view !== 'discover') setView('discover'); }} session={session} onAuth={() => setAuthOpen(true)} onLogout={logout} unread={unread} onNotifications={() => setView('profile')} onAI={() => setAiOpen(true)} onMobile={() => setMobileNav(true)} />
       <main className="page-stage">
         <AnimatePresence mode="wait">
-          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} loadingMore={loadingMore} pageInfo={pageInfo} selected={selected} filters={filters} setFilters={setFilters} priorityQueue={priorityQueue} openOpportunity={openOpportunity} openWorkspace={openWorkspaceAndShow} onRefresh={() => { loadStats(); loadOpportunities(filters); }} onLoadMore={() => loadOpportunities(filters, { append: true, cursor: pageInfo.nextCursor })} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
+          {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} loadingMore={loadingMore} pageInfo={pageInfo} selected={selected} filters={filters} setFilters={setFilters} priorityQueue={priorityQueue} feedPulse={feedPulse} openOpportunity={openOpportunity} openWorkspace={openWorkspaceAndShow} onShowNew={showNewOpportunities} onRefresh={() => refreshDiscovery(true)} onLoadMore={() => loadOpportunities(filters, { append: true, cursor: pageInfo.nextCursor })} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'saved' && <motion.div key="saved" {...pageMotion}><SavedView session={session} items={savedItems} selected={selected} openOpportunity={openOpportunity} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'workspace' && <motion.div key="workspace" {...pageMotion}><WorkspaceView session={session} workspaces={workspaces} workspace={workspace} readiness={readiness} openWorkspace={openWorkspace} activeDocId={activeDocId} setActiveDocId={setActiveDocId} generatePlan={generatePlan} saveDocument={saveDocument} aiDraftDocument={aiDraftDocument} aiReviewDocument={aiReviewDocument} addMember={addMember} addComment={addComment} resolveComment={resolveComment} summarizeTeamReview={summarizeTeamReview} finalizeWorkspace={finalizeWorkspace} recordSubmission={recordSubmission} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'applications' && <motion.div key="applications" {...pageMotion}><ApplicationsView session={session} applications={applications} updateApplication={updateApplication} openOpportunity={openOpportunityAndShow} openWorkspace={openWorkspaceAndShow} onAuth={() => setAuthOpen(true)} /></motion.div>}
@@ -437,17 +442,37 @@ function Topbar({ filters, onSearch, session, onAuth, onLogout, unread, onNotifi
 function PageTitle({ eyebrow, title, copy, action }) { return <div className="page-title"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{copy}</p></div>{action}</div>; }
 function StatCard({ icon: Icon, label, value, note, tone = 'navy' }) { return <motion.article className={cx('stat-card', tone)} whileHover={{ y: -3 }} transition={spring}><div className="stat-icon"><Icon size={18} /></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></motion.article>; }
 
-function DiscoveryView({ stats, opportunities, loading, loadingMore, pageInfo, selected, filters, setFilters, priorityQueue, openOpportunity, openWorkspace, onRefresh, onLoadMore, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
+function DiscoveryView({ stats, opportunities, loading, loadingMore, pageInfo, selected, filters, setFilters, priorityQueue, feedPulse, openOpportunity, openWorkspace, onShowNew, onRefresh, onLoadMore, onClose, onSave, onAI, onWorkspace, onTrack, busy, session, onAuth }) {
   return <div>
     <PageTitle eyebrow="Opportunity intelligence" title="Find work worth chasing." copy="A live, verified feed ranked around fit, timing and evidence—not an endless job board." action={<div className="hero-chip"><ShieldCheck size={17} /> Verified live feed</div>} />
     <div className="stats-row"><StatCard icon={Target} label="Live opportunities" value={Number(stats?.live || 0).toLocaleString()} note="currently open" tone="gold"/><StatCard icon={Globe2} label="Remote" value={Number(stats?.remote || 0).toLocaleString()} note="location-flexible" tone="teal"/><StatCard icon={Clock3} label="Closing soon" value={Number(stats?.closingSoon || 0).toLocaleString()} note="within 14 days" tone="pumpkin"/><StatCard icon={ShieldCheck} label="Active sources" value={Number(stats?.activeSources || 0).toLocaleString()} note="scanning now" tone="chartreuse"/></div>
     {session && <TodayQueue queue={priorityQueue} openOpportunity={openOpportunity} openWorkspace={openWorkspace} />}
+    {session && <FeedPulse pulse={feedPulse} onShowNew={onShowNew} />}
     <div className="discovery-shell">
       <FilterRail filters={filters} setFilters={setFilters} />
-      <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches${pageInfo?.hasMore ? ' · more available' : ''}`}</p></div><button className="compact-btn" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} size={16}/> Refresh</button></div>{loading ? <CardSkeletons /> : opportunities.length ? <><div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>{pageInfo?.hasMore && <div className="feed-more"><button className="button ghost" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? <LoaderCircle className="spin"/> : <Plus/>}{loadingMore ? 'Loading more…' : 'Load more opportunities'}</button></div>}</> : <div className="feed-empty"><Search/><h3>No opportunities match these filters</h3><p>Broaden a filter or reset the search. Radar will keep the verified-source filter on by default.</p><button className="button ghost" onClick={() => setFilters(DEFAULT_FILTERS)}>Reset filters</button></div>}</section>
+      <section className="feed-column"><div className="section-bar"><div><h2>Recommended opportunities</h2><p>{loading ? 'Refreshing live feed…' : `${opportunities.length} current matches${pageInfo?.hasMore ? ' · more available' : ''}`}</p></div><div className="feed-toolbar"><LiveFeedStatus feed={stats?.feed}/><button className="compact-btn" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} size={16}/> Refresh</button></div></div>{loading ? <CardSkeletons /> : opportunities.length ? <><div className="opportunity-grid">{opportunities.map((row, i) => <OpportunityCard key={row.id} row={row} tone={CARD_TONES[i % CARD_TONES.length]} active={selected?.id === row.id} onClick={() => openOpportunity(row.id)} />)}</div>{pageInfo?.hasMore && <div className="feed-more"><button className="button ghost" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? <LoaderCircle className="spin"/> : <Plus/>}{loadingMore ? 'Loading more…' : 'Load more opportunities'}</button></div>}</> : <div className="feed-empty"><Search/><h3>No opportunities match these filters</h3><p>Broaden a filter or reset the search. Radar will keep the verified-source filter on by default.</p><button className="button ghost" onClick={() => setFilters(DEFAULT_FILTERS)}>Reset filters</button></div>}</section>
       <OpportunityPanel row={selected} onClose={onClose} onSave={onSave} onAI={onAI} onWorkspace={onWorkspace} onTrack={onTrack} busy={busy} session={session} onAuth={onAuth} />
     </div>
   </div>;
+}
+
+function relativeAge(value) {
+  if (!value) return 'not yet';
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000));
+  if (minutes < 2) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60); return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+function LiveFeedStatus({ feed }) {
+  if (!feed) return null;
+  return <div className="live-feed-status"><span/><strong>Live Radar</strong><small>updated {relativeAge(feed.lastScanAt)} · {feed.sourcesChecked24h || 0} sources checked · {feed.newLast6h || 0} new / 6h</small></div>;
+}
+function FeedPulse({ pulse, onShowNew }) {
+  if (!pulse) return null;
+  const c = pulse.counts || {};
+  const totalSignals = Number(c.newMatches || 0) + Number(c.applicationRoutesVerified || 0) + Number(c.deadlineChanges || 0);
+  if (!totalSignals) return <section className="feed-pulse caught-up"><div><CheckCircle2/><span><strong>You’re caught up</strong><small>Radar will surface new matches here without reshuffling your current feed.</small></span></div></section>;
+  return <section className="feed-pulse"><div><Sparkles/><span><strong>Since you were last here</strong><small>{c.newMatches || 0} new matches · {c.strongMatches || 0} strong · {c.applicationRoutesVerified || 0} application routes verified · {c.deadlineChanges || 0} deadline updates</small></span></div><button className="button gold" onClick={onShowNew}>{c.newMatches ? `Show ${c.newMatches} new` : 'Refresh updates'} <ArrowUpRight/></button></section>;
 }
 
 function TodayQueue({ queue, openOpportunity, openWorkspace }) {
@@ -474,7 +499,7 @@ function FilterRail({ filters, setFilters }) {
 function OpportunityCard({ row, tone, active, onClick }) {
   const [trust, trustTone] = trustLabel(row); const value = opportunityValue(row); const decision = decisionAssessment(row);
   return <motion.button aria-label={`Open ${row.title}`} className={cx('opportunity-card', `tone-${tone}`, active && 'selected')} onClick={onClick} whileHover={{ y: -5, scale: 1.005 }} transition={spring} layout>
-    <div className="card-topline"><span className={cx('trust-pill', trustTone)}><span />{trust}</span><div className="card-top-actions">{decision && <span className={cx('decision-mini', decision.tone)}>{decision.label}</span>}<span className="bookmark-dot" tabIndex={-1}>{row.saved ? <BookmarkCheck size={15}/> : <Bookmark size={15}/>}</span></div></div>
+    <div className="card-topline"><div className="card-status-pills"><span className={cx('trust-pill', trustTone)}><span />{trust}</span>{row.newToUser ? <span className="freshness-pill new">New to you</span> : row.freshness?.label && row.freshness.label !== 'In Radar' ? <span className={cx('freshness-pill', row.freshness.tone)}>{row.freshness.label}</span> : null}</div><div className="card-top-actions">{decision && <span className={cx('decision-mini', decision.tone)}>{decision.label}</span>}<span className="bookmark-dot" tabIndex={-1}>{row.saved ? <BookmarkCheck size={15}/> : <Bookmark size={15}/>}</span></div></div>
     <div className="card-company">{row.organization || 'Organisation not listed'}</div><h3>{row.title}</h3>
     <div className="card-tags">{row.type && <span>{row.type}</span>}{row.remote && <span>Remote</span>}{row.country && <span>{row.country}</span>}</div>
     <p>{row.summary || row.description || 'Open the opportunity for full details.'}</p>
