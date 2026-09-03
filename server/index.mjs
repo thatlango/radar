@@ -742,6 +742,7 @@ app.get('/api/opportunities', async (req, res, next) => {
     }
     const where = { AND: [
       { OR: [{ deadline: null }, { deadline: { gte: now } }] },
+      { sourceStatus: { not: 'expired' } },
       ...(geographyClause ? [geographyClause] : []),
       ...(q ? [{ OR: [{ title: { contains: q, mode: 'insensitive' } }, { organization: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] }] : []),
       ...(type ? [{ type }] : []), ...(country ? [{ country: { contains: country, mode: 'insensitive' } }] : []),
