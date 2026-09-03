@@ -23,6 +23,9 @@ export interface RawOpportunity {
   deadline?: Date;
   sourceUrl: string;
   source?: string;
+  applicationUrl?: string;
+  applicationEmail?: string;
+  applicationInstructions?: string;
 }
 
 export abstract class BaseScraper {
@@ -88,6 +91,10 @@ export abstract class BaseScraper {
           deadline: opportunity.deadline,
           source: sourceName,
           sourceUrl: opportunity.sourceUrl,
+          applicationUrl: opportunity.applicationUrl,
+          applicationEmail: opportunity.applicationEmail,
+          applicationInstructions: opportunity.applicationInstructions,
+          applicationVerifiedAt: opportunity.applicationUrl || opportunity.applicationEmail || opportunity.applicationInstructions ? now : undefined,
           canonicalKey,
           referenceNumber: this.extractReferenceNumber(opportunity),
           discoveredAt: now,
@@ -108,6 +115,10 @@ export abstract class BaseScraper {
           type: opportunity.type || row.type,
           deadline: opportunity.deadline || row.deadline,
           remote: row.remote || opportunity.remote,
+          applicationUrl: opportunity.applicationUrl || row.applicationUrl,
+          applicationEmail: opportunity.applicationEmail || row.applicationEmail,
+          applicationInstructions: opportunity.applicationInstructions || row.applicationInstructions,
+          applicationVerifiedAt: opportunity.applicationUrl || opportunity.applicationEmail || opportunity.applicationInstructions ? now : row.applicationVerifiedAt,
           lastVerifiedAt: now,
           sourceStatus: 'live',
           verificationStatus: 'verified',
@@ -120,6 +131,13 @@ export abstract class BaseScraper {
       create: { opportunityId: row.id, sourceName, sourceUrl: opportunity.sourceUrl, sourceType: opportunity.type, lastVerifiedAt: now, status: 'live' },
       update: { opportunityId: row.id, sourceName, sourceType: opportunity.type, lastVerifiedAt: now, status: 'live' },
     });
+    if (!row.applicationUrl && !row.applicationEmail && (!row.applicationVerifiedAt || row.applicationVerifiedAt.getTime() < Date.now() - 7 * 86400000)) {
+      await prisma.radarJob.upsert({
+        where: { dedupeKey: `resolve-application:${row.id}` },
+        create: { type: 'resolve_application', payload: { opportunityId: row.id }, dedupeKey: `resolve-application:${row.id}`, status: 'queued' },
+        update: { status: 'queued', runAt: now, completedAt: null, lastError: null },
+      }).catch(() => null);
+    }
     return inserted;
   }
 

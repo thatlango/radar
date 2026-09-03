@@ -16,6 +16,6 @@ export class GrandChallengesScraper extends BaseScraper {
     const title = this.cleanText(row.main_title || row.title || "Grand Challenges funding opportunity");
     const fellowship = /travel award|fellowship|scholarship|conference award/i.test(`${title} ${description}`);
     const sourceUrl = row.url ? new URL(row.url, "https://www.grandchallenges.org").toString() : String(row.apply_link || "https://www.grandchallenges.org/grant-opportunities");
-    return { title, organization: this.cleanText(row.initiative_title || "Grand Challenges"), country: /LMIC|low.?and middle.?income|africa/i.test(description) ? "Global South" : "Global", type: fellowship ? "fellowship" : "grant", remote: false, description: description.slice(0, 30000), deadline: row.date_end ? new Date(Number(row.date_end) * 1000) : undefined, sourceUrl, source: "Grand Challenges" };
+    return { title, organization: this.cleanText(row.initiative_title || "Grand Challenges"), country: /LMIC|low.?and middle.?income|africa/i.test(description) ? "Global South" : "Global", type: fellowship ? "fellowship" : "grant", remote: false, description: description.slice(0, 30000), deadline: row.date_end ? new Date(Number(row.date_end) * 1000) : undefined, sourceUrl, applicationUrl: row.apply_link ? new URL(row.apply_link, "https://www.grandchallenges.org").toString() : undefined, source: "Grand Challenges" };
   }
 }
