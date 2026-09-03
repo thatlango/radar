@@ -108,6 +108,10 @@ model Opportunity {
   deadline        DateTime?
   source          String
   sourceUrl       String    @unique
+  applicationUrl  String?
+  applicationEmail String?
+  applicationInstructions String? @db.Text
+  applicationVerifiedAt DateTime?
   canonicalKey    String?
   referenceNumber String?
   sector          String?
@@ -150,6 +154,7 @@ model Opportunity {
   @@index([verificationStatus])
   @@index([sector])
   @@index([publishedAt])
+  @@index([applicationVerifiedAt])
 }
 
 model OpportunitySource {

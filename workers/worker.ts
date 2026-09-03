@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AIMatchingEngine } from '../ai/matching';
+import { resolveApplicationDestination } from '../scrapers/applicationResolver';
 
 const prisma = new PrismaClient();
 const matching = new AIMatchingEngine();
@@ -28,6 +29,14 @@ async function execute(job: any): Promise<void> {
   if (job.type === 'match_user') {
     if (!payload.userId) throw new Error('match_user requires userId');
     await matching.updateUserMatches(String(payload.userId));
+    return;
+  }
+  if (job.type === 'resolve_application') {
+    if (!payload.opportunityId) throw new Error('resolve_application requires opportunityId');
+    const opportunity = await prisma.opportunity.findUnique({ where: { id: String(payload.opportunityId) } });
+    if (!opportunity) return;
+    const result = await resolveApplicationDestination(opportunity.sourceUrl, String(opportunity.title || '') + ' ' + String(opportunity.description || '') + ' ' + String(opportunity.requirements || ''));
+    await prisma.opportunity.update({ where: { id: opportunity.id }, data: { applicationUrl: result.applicationUrl || null, applicationEmail: result.applicationEmail || null, applicationInstructions: result.applicationInstructions || null, applicationVerifiedAt: new Date() } });
     return;
   }
   throw new Error(`Unsupported Radar job type: ${job.type}`);

@@ -60,7 +60,8 @@ export class LinkedInScraper extends BaseScraper {
       requirements: this.extractRequirements(job.description || ''),
       salary: job.salary,
       deadline,
-      sourceUrl: job.applyUrl || `https://www.linkedin.com/jobs/view/${job.jobId}`,
+      sourceUrl: `https://www.linkedin.com/jobs/view/${job.jobId}`,
+      applicationUrl: job.applyUrl || `https://www.linkedin.com/jobs/view/${job.jobId}`,
     };
   }
 

@@ -325,6 +325,7 @@ function opportunityView(row, extra = {}) {
     id: row.id, title: presentation.title, officialTitle: presentation.officialTitle, organization: row.organization, country: row.country, region: row.region,
     type: row.type, remote: row.remote, description: row.description, requirements: row.requirements,
     compensation: row.salary, deadline: row.deadline, source: row.source, sourceUrl: row.sourceUrl,
+    applicationUrl: row.applicationUrl, applicationEmail: row.applicationEmail, applicationInstructions: row.applicationInstructions, applicationVerifiedAt: row.applicationVerifiedAt,
     referenceNumber: row.referenceNumber, sector: row.sector, currency: row.currency, valueMin: row.valueMin, valueMax: row.valueMax,
     contractDuration: row.contractDuration, submissionMethod: row.submissionMethod, languages: row.languages || [], eligibilityCountries: row.eligibilityCountries || [],
     publishedAt: row.publishedAt, discoveredAt: row.discoveredAt, lastVerifiedAt: row.lastVerifiedAt, sourceStatus: row.sourceStatus,
@@ -334,6 +335,27 @@ function opportunityView(row, extra = {}) {
     ...extra,
   };
 }
+function compactAiOpportunity(row, textLimit = 1000) {
+  const view = opportunityView(row);
+  return {
+    id: view.id, title: view.title, organization: view.organization, country: view.country, region: view.region, type: view.type, remote: view.remote,
+    deadline: view.deadline, referenceNumber: view.referenceNumber, sector: view.sector, contractDuration: view.contractDuration, submissionMethod: view.submissionMethod,
+    summary: cleanOpportunityText(view.summary).slice(0, textLimit),
+    description: cleanOpportunityText(view.description).slice(0, textLimit),
+    requirements: cleanOpportunityText(view.requirements).slice(0, textLimit),
+  };
+}
+
+function compactLibrary(docs, contentLimit = 900) {
+  return docs.map((d) => ({
+    title: d.title,
+    category: d.category,
+    verificationStatus: d.verificationStatus || 'unverified',
+    claims: Array.isArray(d.extractedClaims?.claims) ? d.extractedClaims.claims.slice(0, 8).map((item) => ({ claim: String(item?.claim || '').slice(0, 240), evidence: String(item?.evidence || '').slice(0, 320), confidence: item?.confidence })) : [],
+    content: String(d.content || '').slice(0, contentLimit),
+  }));
+}
+
 function documentView(row) {
   return {
     id: row.id, title: row.title, kind: row.kind, status: row.status, content: row.content,
@@ -451,6 +473,52 @@ function workspaceProgress(documents) {
   const weights = { pending: 0, drafting: 25, review: 60, approved: 90, complete: 100 };
   return Math.round(documents.reduce((sum, d) => sum + (weights[d.status] ?? 0), 0) / documents.length);
 }
+function workspaceReadinessAssessment(workspace, match = null) {
+  const documents = workspace?.documents || [];
+  const comments = workspace?.comments || [];
+  const opportunity = workspace?.opportunity || {};
+  const blockers = [];
+  const warnings = [];
+  const checks = [];
+  const nonReady = documents.filter((d) => !['approved','complete'].includes(d.status));
+  const empty = documents.filter((d) => !String(d.content || '').trim());
+  const placeholders = documents.filter((d) => /\[NEEDS INPUT[^\]]*\]/i.test(String(d.content || '')));
+  const unresolvedComments = comments.filter((c) => c.status !== 'resolved');
+  const hardConstraints = Array.isArray(match?.hardConstraints) ? match.hardConstraints : [];
+  const missingRequirements = Array.isArray(match?.missingRequirements) ? match.missingRequirements : [];
+  const days = daysUntil(workspace?.submissionDeadline || opportunity?.deadline);
+  if (!documents.length) blockers.push({ code: 'NO_DOCUMENTS', message: 'No required application documents are in this workspace yet.' });
+  if (nonReady.length) blockers.push({ code: 'DOCUMENTS_NOT_APPROVED', message: `${nonReady.length} required document${nonReady.length === 1 ? '' : 's'} still need approval or completion.`, items: nonReady.map((d) => d.title) });
+  if (empty.length) blockers.push({ code: 'EMPTY_DOCUMENTS', message: `${empty.length} required document${empty.length === 1 ? '' : 's'} are still empty.`, items: empty.map((d) => d.title) });
+  if (placeholders.length) blockers.push({ code: 'NEEDS_INPUT', message: `${placeholders.length} document${placeholders.length === 1 ? '' : 's'} still contain [NEEDS INPUT] placeholders.`, items: placeholders.map((d) => d.title) });
+  if (unresolvedComments.length) blockers.push({ code: 'OPEN_REVIEW_COMMENTS', message: `${unresolvedComments.length} review comment${unresolvedComments.length === 1 ? '' : 's'} remain unresolved.` });
+  if (hardConstraints.length) blockers.push({ code: 'ELIGIBILITY_BLOCKER', message: `${hardConstraints.length} eligibility blocker${hardConstraints.length === 1 ? '' : 's'} remain unresolved.`, items: hardConstraints.slice(0, 6) });
+  if (days !== null && days < 0) blockers.push({ code: 'DEADLINE_PASSED', message: 'The listed submission deadline has passed.' });
+  else if (days !== null && days <= 2) warnings.push({ code: 'DEADLINE_CRITICAL', message: `Only ${Math.max(0, days)} day${days === 1 ? '' : 's'} remain before the deadline.` });
+  else if (days !== null && days <= 5) warnings.push({ code: 'DEADLINE_CLOSE', message: `${days} days remain before the deadline.` });
+  if (missingRequirements.length) warnings.push({ code: 'EVIDENCE_GAPS', message: `${missingRequirements.length} evidence gap${missingRequirements.length === 1 ? '' : 's'} are still recorded against this opportunity.`, items: missingRequirements.slice(0, 6) });
+  if (opportunity?.sourceStatus === 'stale' || opportunity?.verificationStatus === 'needs_review') warnings.push({ code: 'SOURCE_RECHECK', message: 'The source listing should be re-checked before submission.' });
+  checks.push({ label: 'Required documents approved', passed: nonReady.length === 0 && documents.length > 0, count: documents.length - nonReady.length, total: documents.length });
+  checks.push({ label: 'No unresolved placeholders', passed: placeholders.length === 0, count: placeholders.length });
+  checks.push({ label: 'Review comments resolved', passed: unresolvedComments.length === 0, count: unresolvedComments.length });
+  checks.push({ label: 'No hard eligibility blockers', passed: hardConstraints.length === 0, count: hardConstraints.length });
+  checks.push({ label: 'Deadline still viable', passed: days === null || days >= 0, daysRemaining: days });
+  let score = 100;
+  score -= Math.min(40, nonReady.length * 8);
+  score -= Math.min(30, empty.length * 10);
+  score -= Math.min(36, placeholders.length * 12);
+  score -= Math.min(20, unresolvedComments.length * 5);
+  score -= Math.min(40, hardConstraints.length * 20);
+  score -= Math.min(16, missingRequirements.length * 4);
+  if (days !== null && days < 0) score -= 50;
+  else if (days !== null && days <= 2) score -= 15;
+  else if (days !== null && days <= 5) score -= 8;
+  if (opportunity?.sourceStatus === 'stale' || opportunity?.verificationStatus === 'needs_review') score -= 8;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const canFinalize = blockers.length === 0;
+  const status = canFinalize ? (warnings.length ? 'ready_with_warnings' : 'ready') : score >= 60 ? 'needs_attention' : 'blocked';
+  return { score, status, canFinalize, blockers, warnings, checks, daysRemaining: days, generatedAt: new Date() };
+}
 async function ownedWorkspace(userId, id, include = {}) {
   return prisma.opportunityWorkspace.findFirst({ where: { id, userId }, include });
 }
@@ -482,7 +550,7 @@ async function createNotification(userId, type, title, body, metadata = {}) {
 }
 async function libraryContext(userId, limit = 10) {
   const docs = await prisma.userDocument.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' }, take: limit });
-  return docs.map((d) => ({ title: d.title, category: d.category, content: String(d.content || '').slice(0, 5000) }));
+  return docs.map((d) => ({ title: d.title, category: d.category, content: String(d.content || '').slice(0, 5000), extractedClaims: d.extractedClaims, verificationStatus: d.verificationStatus, expiresAt: d.expiresAt, lastReviewedAt: d.lastReviewedAt }));
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'radar', runtime: 'vps', milestone: 'opportunity-os' }));
@@ -685,6 +753,97 @@ app.get('/api/stats', async (_req, res) => {
   res.json({ live, remote, closingSoon, activeSources: sources });
 });
 
+app.get('/api/me/priority-queue', requireSession, async (req, res, next) => {
+  try {
+    const userId = req.radarSession.userId;
+    const now = new Date();
+    const horizon = new Date(Date.now() + 30 * 86400000);
+    const [workspaces, matches, applications, savedRows] = await Promise.all([
+      prisma.opportunityWorkspace.findMany({
+        where: { userId, status: { notIn: ['submitted','closed'] } },
+        include: { opportunity: true, documents: true },
+        orderBy: { updatedAt: 'desc' }, take: 20,
+      }),
+      prisma.match.findMany({
+        where: { userId, opportunity: { AND: [{ OR: [{ deadline: null }, { deadline: { gte: now } }] }, { OR: [{ deadline: null }, { deadline: { lte: horizon } }] }] } },
+        include: { opportunity: true }, orderBy: { finalRank: 'desc' }, take: 40,
+      }),
+      prisma.application.findMany({ where: { userId }, select: { opportunityId: true, status: true, updatedAt: true } }),
+      prisma.savedOpportunity.findMany({ where: { userId }, select: { opportunityId: true } }),
+    ]);
+    const appMap = new Map(applications.map((item) => [item.opportunityId, item]));
+    const workspaceIds = new Set(workspaces.map((item) => item.opportunityId));
+    const savedIds = new Set(savedRows.map((item) => item.opportunityId));
+    const seen = new Set();
+    const items = [];
+    const add = (item) => {
+      if (!item?.opportunity?.id || seen.has(item.opportunity.id)) return;
+      seen.add(item.opportunity.id); items.push(item);
+    };
+    for (const workspace of workspaces) {
+      const deadline = workspace.submissionDeadline || workspace.opportunity?.deadline;
+      const days = daysUntil(deadline);
+      const incomplete = (workspace.documents || []).filter((d) => !['approved','complete'].includes(d.status)).length;
+      const progress = workspaceProgress(workspace.documents || []);
+      if ((days !== null && days <= 10) || incomplete > 0) {
+        add({
+          kind: days !== null && days <= 5 ? 'act_now' : 'application',
+          urgency: days !== null && days <= 2 ? 'critical' : days !== null && days <= 5 ? 'high' : 'normal',
+          title: days !== null && days <= 5 ? `${Math.max(0, days)} days left — application needs attention` : 'Continue application package',
+          reason: incomplete ? `${incomplete} document${incomplete === 1 ? '' : 's'} still need work.` : `${progress}% of the package is ready.`,
+          action: incomplete ? 'Open workspace and resolve the next incomplete document.' : 'Review and finalize the package.',
+          workspaceId: workspace.id,
+          progress,
+          opportunity: opportunityView(workspace.opportunity),
+        });
+      }
+    }
+    for (const match of matches) {
+      const opportunity = match.opportunity;
+      if (!opportunity || workspaceIds.has(opportunity.id)) continue;
+      const hard = match.hardConstraints || [];
+      const missing = match.missingRequirements || [];
+      const specialists = match.specialistNeeds || [];
+      const days = daysUntil(opportunity.deadline);
+      const app = appMap.get(opportunity.id);
+      if (app && ['applied','interview','offer','rejected'].includes(app.status)) continue;
+      const fitEvidence = { explanation: match.explanation, keySkillMatches: match.keySkillMatches || [], missingRequirements: missing, hardConstraints: hard, specialistNeeds: specialists, confidence: match.confidence };
+      if (hard.length === 0 && Number(match.finalRank) >= 72) {
+        add({
+          kind: 'strong_match', urgency: days !== null && days <= 7 ? 'high' : 'normal',
+          title: 'Strong match worth a decision',
+          reason: `${Math.round(match.finalRank)}% fit${days !== null ? ` · ${Math.max(0, days)} days left` : ''}${savedIds.has(opportunity.id) ? ' · saved' : ''}.`,
+          action: missing[0] ? `Verify evidence for: ${cleanOpportunityText(missing[0]).slice(0, 160)}` : 'Review eligibility and make the pursue/skip decision.',
+          opportunity: opportunityView(opportunity, { fitScore: match.finalRank, fitEvidence }),
+        });
+      } else if (Number(match.finalRank) >= 60 && (missing.length || specialists.length) && hard.length === 0) {
+        add({
+          kind: 'evidence_gap', urgency: days !== null && days <= 7 ? 'high' : 'normal',
+          title: specialists.length ? 'A partner could unlock this opportunity' : 'Evidence gap is blocking confidence',
+          reason: specialists[0] || missing[0],
+          action: specialists[0] ? `Find or assign: ${cleanOpportunityText(specialists[0]).slice(0, 160)}` : `Locate evidence for: ${cleanOpportunityText(missing[0]).slice(0, 160)}`,
+          opportunity: opportunityView(opportunity, { fitScore: match.finalRank, fitEvidence }),
+        });
+      }
+      if (items.length >= 8) break;
+    }
+    const ordered = items.sort((a, b) => {
+      const weight = { critical: 4, high: 3, normal: 2, low: 1 };
+      return (weight[b.urgency] || 0) - (weight[a.urgency] || 0) || Number(b.opportunity?.fitScore || 0) - Number(a.opportunity?.fitScore || 0);
+    }).slice(0, 8);
+    res.json({
+      items: ordered,
+      summary: {
+        actNow: ordered.filter((item) => ['act_now','application'].includes(item.kind) && ['critical','high'].includes(item.urgency)).length,
+        strongMatches: ordered.filter((item) => item.kind === 'strong_match').length,
+        evidenceGaps: ordered.filter((item) => item.kind === 'evidence_gap').length,
+        activeApplications: workspaces.length,
+      },
+      generatedAt: new Date(),
+    });
+  } catch (error) { next(error); }
+});
+
 app.get('/api/me/capability', requireSession, async (req, res, next) => {
   try { res.json({ capability: await capabilityContext(req.radarSession.userId) }); }
   catch (error) { next(error); }
@@ -729,6 +888,7 @@ app.put('/api/me/profile', requireSession, async (req, res, next) => {
       preferences, onboardingComplete: true,
     } });
     if (preferences.dailyBriefEnabled !== undefined) await upsertDailyAlert(user.id, preferences);
+    await enqueueUserRematch(user.id);
     res.json(publicUser(user));
   } catch (error) { next(error); }
 });
@@ -756,12 +916,16 @@ app.post('/api/me/resume', requireSession, async (req, res, next) => {
     const current = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
     const skills = cleanList(extracted?.skills, 60), industries = cleanList(extracted?.industries, 30);
     const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: text, resumeUrl: fileName, parsedSkills: skills.length ? skills : current?.parsedSkills || [], parsedIndustries: industries.length ? industries : current?.parsedIndustries || [], onboardingComplete: true } });
+    await enqueueUserRematch(user.id);
     res.json({ user: publicUser(user), extracted: extracted || null, characters: text.length });
   } catch (error) { next(error); }
 });
 app.delete('/api/me/resume', requireSession, async (req, res, next) => {
-  try { res.json(publicUser(await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: null, resumeUrl: null } }))); }
-  catch (error) { next(error); }
+  try {
+    const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { resumeText: null, resumeUrl: null } });
+    await enqueueUserRematch(user.id);
+    res.json(publicUser(user));
+  } catch (error) { next(error); }
 });
 app.get('/api/me/briefing', requireSession, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
@@ -805,6 +969,70 @@ app.post('/api/opportunities/:id/applications', requireSession, async (req, res)
   const row = await prisma.application.upsert({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: req.params.id } }, update: data, create: { userId: req.radarSession.userId, opportunityId: req.params.id, ...data } });
   res.json(row);
 });
+app.post('/api/opportunities/:id/eligibility', requireSession, async (req, res, next) => {
+  try {
+    const opportunity = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
+    if (!opportunity) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Opportunity not found.' } });
+    const user = req.radarSession.user;
+    const preferences = safePrefs(user);
+    const capability = await capabilityContext(user.id);
+    const library = await libraryContext(user.id, 8);
+    const baseScore = deterministicFit(user, opportunity);
+    const ai = await aiAssist(
+      'Act as a strict opportunity eligibility analyst. Return valid JSON only with keys: decision (pursue|consider|skip), fitScore (0-100), confidence (0-1), summary (max 45 words), keySkillMatches (array), missingRequirements (array), hardConstraints (array), specialistNeeds (array), requirements (array of objects with requirement, status, evidence, action). Allowed status values: met, likely_met, missing_evidence, not_met, partner_solvable. Test explicit requirements against supplied profile/capability/evidence only. Never infer a credential, reference, registration, turnover, licence, qualification, geography, language or experience that is not evidenced. For firm/both profiles that can recruit specialists, classify recruitable technical expertise as partner_solvable rather than not_met, but do not soften corporate/legal/financial eligibility. Keep requirements to the 12 most decision-relevant items.',
+      {
+        profile: {
+          name: user.name,
+          skills: user.parsedSkills || [],
+          industries: user.parsedIndustries || [],
+          preferences,
+          capability,
+          resumeText: String(user.resumeText || '').slice(0, 4500),
+        },
+        evidenceLibrary: compactLibrary(library.slice(0, 8), 650),
+        opportunity: compactAiOpportunity(opportunity, 1200),
+        deterministicFitScore: baseScore,
+      },
+      `radar-eligibility:${opportunity.id}:${user.id}`.slice(0, 220),
+      'analyze',
+      720,
+      'interactive'
+    );
+    const parsed = parsePossibleJson(ai.text) || {};
+    const keySkillMatches = cleanList(parsed.keySkillMatches, 20);
+    const missingRequirements = cleanList(parsed.missingRequirements, 20);
+    const hardConstraints = cleanList(parsed.hardConstraints, 20);
+    const specialistNeeds = cleanList(parsed.specialistNeeds, 20);
+    const confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? .6)));
+    const aiScore = Math.max(0, Math.min(100, Number(parsed.fitScore ?? baseScore)));
+    const requirements = Array.isArray(parsed.requirements) ? parsed.requirements.slice(0, 12).map((item) => ({
+      requirement: cleanOpportunityText(item?.requirement).slice(0, 260),
+      status: ['met','likely_met','missing_evidence','not_met','partner_solvable'].includes(String(item?.status)) ? String(item.status) : 'missing_evidence',
+      evidence: cleanOpportunityText(item?.evidence).slice(0, 360),
+      action: cleanOpportunityText(item?.action).slice(0, 320),
+    })).filter((item) => item.requirement) : [];
+    const explanation = cleanOpportunityText(parsed.summary || parsed.explanation || ai.text).slice(0, 1600) || 'Eligibility analysis completed.';
+    const match = await prisma.match.upsert({
+      where: { userId_opportunityId: { userId: user.id, opportunityId: opportunity.id } },
+      update: { gptMatchScore: aiScore, explanation, keySkillMatches, missingRequirements, hardConstraints, specialistNeeds, confidence, finalRank: aiScore },
+      create: { userId: user.id, opportunityId: opportunity.id, gptMatchScore: aiScore, explanation, keySkillMatches, missingRequirements, hardConstraints, specialistNeeds, confidence, finalRank: aiScore },
+    });
+    res.json({
+      decision: ['pursue','consider','skip'].includes(String(parsed.decision)) ? String(parsed.decision) : null,
+      fitScore: match.finalRank,
+      confidence,
+      explanation,
+      keySkillMatches,
+      missingRequirements,
+      hardConstraints,
+      specialistNeeds,
+      requirements,
+      interactionId: ai.interactionId,
+      model: ai.model,
+    });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/opportunities/:id/fit', requireSession, async (req, res, next) => {
   try {
     const opportunity = await prisma.opportunity.findUnique({ where: { id: req.params.id } });
@@ -886,9 +1114,9 @@ app.post('/api/workspaces/:id/ai/plan', requireSession, async (req, res, next) =
     const library = await libraryContext(user.id, 8);
     const capability = await capabilityContext(user.id);
     const ai = await aiAssist(
-      'Build a practical application/bid plan. Return JSON only with keys recommendation (pursue|hold|skip), rationale, hardConstraints (array), evidenceGaps (array), specialistNeeds (array), documents (array of {title, nextAction}), timeline (array of {when, action}), and nextBestAction. Use only supplied facts. Missing facts must be labelled as gaps, not guessed.',
-      { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), capability }, opportunity: opportunityView(row.opportunity), documents: row.documents.map(documentView), reusableLibrary: library.map((d) => ({ title: d.title, category: d.category })) },
-      `radar-workspace-plan:${row.id}`, 'recommend', 1200, 'background'
+      'Build a compact practical application/bid plan. Return valid JSON only with keys recommendation (pursue|hold|skip), rationale, hardConstraints, evidenceGaps, specialistNeeds, documents (array of {title, nextAction}), timeline (array of {when, action}), and nextBestAction. Keep rationale under 55 words; hardConstraints, evidenceGaps and specialistNeeds to at most 3 items each; timeline to at most 4 short relative steps such as Today or Next 48 hours unless an exact date is supplied; documents to required documents only. Use only supplied facts. Missing facts must be labelled as gaps, never guessed. Finish the JSON within the response limit.',
+      { profile: { skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), capability }, opportunity: compactAiOpportunity(row.opportunity, 850), documents: row.documents.map((d) => ({ title: d.title, kind: d.kind, status: d.status })), reusableLibrary: library.slice(0, 6).map((d) => ({ title: d.title, category: d.category })) },
+      `radar-workspace-plan:${row.id}`, 'recommend', 320, 'interactive'
     );
     const parsed = parsePossibleJson(ai.text);
     const updated = await prisma.opportunityWorkspace.update({ where: { id: row.id }, data: { aiPlan: ai.text, aiPlanStructured: parsed || undefined, lastAiInteractionId: ai.interactionId || null } });
@@ -930,7 +1158,7 @@ app.post('/api/workspaces/:id/documents/:documentId/ai-draft', requireSession, a
     const library = await libraryContext(user.id, 10);
     const capability = await capabilityContext(user.id);
     const instruction = `Draft the workspace document titled "${document.title}". Use only facts in the supplied profile, opportunity and reusable document library. Never invent past performance, partners, team members, budgets, certifications, dates, references or eligibility. Where required information is absent, insert an explicit [NEEDS INPUT: ...] placeholder. Preserve a professional submission-ready structure. Do not claim the application has been submitted.`;
-    const ai = await aiAssist(instruction, { profile: { name: user.name, skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), capability, resumeText: String(user.resumeText || '').slice(0, 16000) }, opportunity: opportunityView(workspace.opportunity), reusableLibrary: library, otherWorkspaceDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status, content: String(d.content || '').slice(0, 4000) })), userInstruction: String(req.body?.instruction || '').slice(0, 4000) }, `radar-workspace-doc:${document.id}`, 'draft', 1800, 'background');
+    const ai = await aiAssist(instruction, { profile: { name: user.name, skills: user.parsedSkills, industries: user.parsedIndustries, preferences: safePrefs(user), capability, resumeText: String(user.resumeText || '').slice(0, 3500) }, opportunity: compactAiOpportunity(workspace.opportunity, 900), reusableLibrary: compactLibrary(library.slice(0, 6), 700), otherWorkspaceDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status, content: String(d.content || '').slice(0, 700) })), userInstruction: String(req.body?.instruction || '').slice(0, 1000) }, `radar-workspace-doc:${document.id}`, 'draft', 420, 'interactive');
     await recordUsage(prisma, req.radarSession.userId, 'ai_drafts');
     const updated = await prisma.workspaceDocument.update({ where: { id: document.id }, data: { content: ai.text, checksum: crypto.createHash('sha256').update(ai.text).digest('hex'), evidenceRefs: library.map((item) => ({ title: item.title, category: item.category })), lastSavedByUserId: req.radarSession.userId, generatedByAi: true, status: 'review', version: { increment: 1 }, metadata: { ...safeJson(document.metadata), lastAiInteractionId: ai.interactionId || null, lastAiModel: ai.model || null } } });
     const docs = await prisma.workspaceDocument.findMany({ where: { workspaceId: workspace.id } });
@@ -946,21 +1174,30 @@ app.post('/api/workspaces/:id/documents/:documentId/ai-review', requireSession, 
     const document = workspace.documents.find((d) => d.id === req.params.documentId);
     if (!document) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
     if (!document.content) return res.status(422).json({ error: { code: 'DOCUMENT_EMPTY', message: 'Draft the document before requesting a review.' } });
-    const ai = await aiAssist('Review this draft against the opportunity. Return concise sections: Coverage, Unsupported or risky claims, Missing evidence, Consistency issues, Required edits, and Submission readiness (0-100). Treat any [NEEDS INPUT] placeholders as unresolved. Never invent replacement facts.', { opportunity: opportunityView(workspace.opportunity), document: { title: document.title, content: document.content }, otherDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status })) }, `radar-workspace-review:${document.id}`, 'analyze', 1100, 'background');
+    const ai = await aiAssist('Review this draft against the opportunity. Return concise sections: Coverage, Unsupported or risky claims, Missing evidence, Consistency issues, Required edits, and Submission readiness (0-100). Treat any [NEEDS INPUT] placeholders as unresolved. Never invent replacement facts.', { opportunity: compactAiOpportunity(workspace.opportunity, 800), document: { title: document.title, content: String(document.content || '').slice(0, 4500) }, otherDocuments: workspace.documents.filter((d) => d.id !== document.id).map((d) => ({ title: d.title, status: d.status })) }, `radar-workspace-review:${document.id}`, 'analyze', 300, 'interactive');
     await prisma.workspaceDocument.update({ where: { id: document.id }, data: { status: 'review', metadata: { ...safeJson(document.metadata), lastReview: ai.text, lastReviewInteractionId: ai.interactionId || null } } });
     res.json({ text: ai.text, model: ai.model, interactionId: ai.interactionId });
   } catch (error) { next(error); }
 });
+app.get('/api/workspaces/:id/readiness', requireSession, async (req, res, next) => {
+  try {
+    const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id, { documents: true, opportunity: true, comments: true });
+    if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
+    const match = await prisma.match.findUnique({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId } } });
+    res.json(workspaceReadinessAssessment(workspace, match));
+  } catch (error) { next(error); }
+});
 app.post('/api/workspaces/:id/finalize', requireSession, async (req, res, next) => {
   try {
-    const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id, { documents: true, opportunity: true });
+    const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id, { documents: true, opportunity: true, comments: true });
     if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
     requireWorkspaceRole(workspace, req.radarSession.userId, ['owner','editor']);
-    const unresolved = workspace.documents.filter((d) => !['approved', 'complete'].includes(d.status));
-    if (unresolved.length) return res.status(409).json({ error: { code: 'DOCUMENTS_NOT_READY', message: `${unresolved.length} required document(s) still need approval or completion.`, details: unresolved.map((d) => d.title) } });
+    const match = await prisma.match.findUnique({ where: { userId_opportunityId: { userId: req.radarSession.userId, opportunityId: workspace.opportunityId } } });
+    const readiness = workspaceReadinessAssessment(workspace, match);
+    if (!readiness.canFinalize) return res.status(409).json({ error: { code: 'SUBMISSION_READINESS_BLOCKED', message: 'Resolve Radar submission-readiness blockers before finalizing this package.', details: readiness.blockers.map((item) => item.message), readiness } });
     const updated = await prisma.opportunityWorkspace.update({ where: { id: workspace.id }, data: { status: 'ready', progress: 100 } });
-    await createNotification(req.radarSession.userId, 'workspace_ready', 'Application package ready', `${compactOpportunityTitle(workspace.opportunity.title)} is internally ready for submission. Radar has not submitted it.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId });
-    res.json(workspaceView(updated));
+    await createNotification(req.radarSession.userId, 'workspace_ready', 'Application package ready', `${compactOpportunityTitle(workspace.opportunity.title)} passed Radar readiness gates and is internally ready for submission. Radar has not submitted it.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId, readinessScore: readiness.score });
+    res.json({ ...workspaceView(updated), readiness });
   } catch (error) { next(error); }
 });
 app.post('/api/workspaces/:id/submit', requireSession, async (req, res, next) => {
@@ -1028,7 +1265,7 @@ app.post('/api/workspaces/:id/ai/team-summary', requireSession, async (req, res,
     const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id, { opportunity: true, comments: true, documents: true, members: true });
     if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
     requireWorkspaceRole(workspace, req.radarSession.userId, ['owner','editor','reviewer']);
-    const ai = await aiAssist('Summarize unresolved team review work. Identify decisions needed, document-specific edits, blockers, owners when explicitly stated, and the next three actions. Do not invent assignments or decisions.', { opportunity: opportunityView(workspace.opportunity), documents: workspace.documents.map((d) => ({ id: d.id, title: d.title, status: d.status })), members: workspace.members.map((m) => ({ name: m.name, email: m.email, role: m.role })), comments: workspace.comments.filter((c) => c.status !== 'resolved').map((c) => ({ documentId: c.documentId, authorName: c.authorName, body: c.body })) }, `radar-team-summary:${workspace.id}`, 'summarize', 850, 'background');
+    const ai = await aiAssist('Summarize unresolved team review work. Identify decisions needed, document-specific edits, blockers, owners when explicitly stated, and the next three actions. Do not invent assignments or decisions.', { opportunity: compactAiOpportunity(workspace.opportunity, 650), documents: workspace.documents.map((d) => ({ id: d.id, title: d.title, status: d.status })), members: workspace.members.map((m) => ({ name: m.name, email: m.email, role: m.role })), comments: workspace.comments.filter((c) => c.status !== 'resolved').slice(0, 20).map((c) => ({ documentId: c.documentId, authorName: c.authorName, body: String(c.body || '').slice(0, 500) })) }, `radar-team-summary:${workspace.id}`, 'summarize', 260, 'interactive');
     res.json({ text: ai.text, model: ai.model, interactionId: ai.interactionId });
   } catch (error) { next(error); }
 });
@@ -1037,6 +1274,63 @@ app.get('/api/me/documents', requireSession, async (req, res, next) => {
   try { const rows = await prisma.userDocument.findMany({ where: { userId: req.radarSession.userId }, orderBy: { updatedAt: 'desc' } }); res.json({ items: rows.map((r) => userDocumentView(r, false)) }); }
   catch (error) { next(error); }
 });
+app.get('/api/me/evidence-health', requireSession, async (req, res, next) => {
+  try {
+    const userId = req.radarSession.userId;
+    const [docs, matches] = await Promise.all([
+      prisma.userDocument.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' } }),
+      prisma.match.findMany({ where: { userId, finalRank: { gte: 55 } }, include: { opportunity: true }, orderBy: { finalRank: 'desc' }, take: 40 }),
+    ]);
+    const now = new Date();
+    const aiReady = docs.filter((d) => Boolean(d.content)).length;
+    const extracted = docs.filter((d) => d.extractedClaims && typeof d.extractedClaims === 'object').length;
+    const verified = docs.filter((d) => ['verified','machine_extracted'].includes(d.verificationStatus)).length;
+    const expired = docs.filter((d) => d.expiresAt && d.expiresAt < now).length;
+    const categories = [...new Set(docs.map((d) => d.category).filter(Boolean))];
+    const claimCount = docs.reduce((sum, d) => sum + (Array.isArray(d.extractedClaims?.claims) ? d.extractedClaims.claims.length : 0), 0);
+    const evidenceDocs = docs.map((d) => ({
+      id: d.id, title: d.title, category: d.category,
+      text: `${d.title} ${d.category} ${String(d.content || '').slice(0, 12000)} ${JSON.stringify(d.extractedClaims || {})}`.toLowerCase(),
+    }));
+    const tokenize = (value) => [...new Set(String(value || '').toLowerCase().split(/[^a-z0-9+#.-]+/).filter((x) => x.length >= 4))].slice(0, 24);
+    const gapMap = new Map();
+    for (const match of matches) {
+      for (const requirement of (match.missingRequirements || []).slice(0, 12)) {
+        const clean = cleanOpportunityText(requirement).slice(0, 320);
+        if (!clean) continue;
+        const tokens = tokenize(clean);
+        let best = null;
+        for (const doc of evidenceDocs) {
+          const hits = tokens.filter((token) => doc.text.includes(token)).length;
+          const ratio = tokens.length ? hits / Math.min(tokens.length, 8) : 0;
+          if (!best || ratio > best.ratio) best = { ratio, doc };
+        }
+        const key = clean.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 180);
+        const existing = gapMap.get(key) || { requirement: clean, occurrences: 0, opportunities: [], likelyEvidence: null };
+        existing.occurrences += 1;
+        if (existing.opportunities.length < 3) existing.opportunities.push({ id: match.opportunityId, title: compactOpportunityTitle(match.opportunity?.title || ''), fitScore: Math.round(match.finalRank) });
+        if (best?.ratio >= .5 && (!existing.likelyEvidence || best.ratio > existing.likelyEvidence.score)) existing.likelyEvidence = { documentId: best.doc.id, title: best.doc.title, category: best.doc.category, score: Math.round(best.ratio * 100) };
+        gapMap.set(key, existing);
+      }
+    }
+    const gaps = [...gapMap.values()].sort((a, b) => b.occurrences - a.occurrences).slice(0, 10);
+    const coveredGaps = gaps.filter((g) => g.likelyEvidence).length;
+    const unresolvedGaps = gaps.filter((g) => !g.likelyEvidence);
+    const score = Math.max(0, Math.min(100, Math.round(
+      (docs.length ? 15 : 0) + Math.min(25, aiReady * 7) + Math.min(25, extracted * 8) + Math.min(15, categories.length * 4) + Math.min(10, verified * 3) + (gaps.length ? Math.round((coveredGaps / gaps.length) * 10) : 10) - Math.min(15, expired * 5)
+    )));
+    res.json({
+      score,
+      totals: { documents: docs.length, aiReady, extracted, verified, expired, claims: claimCount, categories: categories.length },
+      categories,
+      coverage: { trackedGaps: gaps.length, likelyCovered: coveredGaps, unresolved: unresolvedGaps.length },
+      unresolvedGaps: unresolvedGaps.slice(0, 6),
+      likelyCoveredGaps: gaps.filter((g) => g.likelyEvidence).slice(0, 6),
+      generatedAt: now,
+    });
+  } catch (error) { next(error); }
+});
+
 app.get('/api/me/documents/:id', requireSession, async (req, res, next) => {
   try { const row = await prisma.userDocument.findFirst({ where: { id: req.params.id, userId: req.radarSession.userId } }); if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } }); res.json(userDocumentView(row, true)); }
   catch (error) { next(error); }
@@ -1082,7 +1376,7 @@ app.post('/api/me/documents/:id/ai/extract-evidence', requireSession, async (req
     const row = await prisma.userDocument.findFirst({ where: { id: req.params.id, userId: req.radarSession.userId } });
     if (!row) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Document not found.' } });
     if (!row.content) return res.status(422).json({ error: { code: 'DOCUMENT_EMPTY', message: 'The document has no extractable text.' } });
-    const ai = await aiAssist('Extract reusable evidence from this document. Return JSON only with keys claims (array of {claim, evidence, confidence}), organisations, roles, dates, sectors, geographies, certifications, financialFacts, and warnings. Use only facts explicitly present. Do not infer missing achievements or eligibility.', { title: row.title, category: row.category, content: String(row.content).slice(0, 28000) }, `radar-evidence:${row.id}`, 'extract', 1300, 'background');
+    const ai = await aiAssist('Extract reusable evidence from this document. Return JSON only with keys claims (array of {claim, evidence, confidence}), organisations, roles, dates, sectors, geographies, certifications, financialFacts, and warnings. Use only facts explicitly present. Do not infer missing achievements or eligibility.', { title: row.title, category: row.category, content: String(row.content).slice(0, 6000) }, `radar-evidence:${row.id}`, 'extract', 340, 'interactive');
     const parsed = parsePossibleJson(ai.text) || { raw: ai.text };
     const updated = await prisma.userDocument.update({ where: { id: row.id }, data: { extractedClaims: parsed, verificationStatus: 'machine_extracted', metadata: { ...safeJson(row.metadata), lastEvidenceInteractionId: ai.interactionId || null, lastEvidenceModel: ai.model || null } } });
     res.json(userDocumentView(updated, true));
@@ -1199,6 +1493,8 @@ app.get('/api/ops/summary', requireSession, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.get(['/app', '/app/'], (_req, res) => res.sendFile(path.join(publicDir, 'app-ui', 'index.html')));
+app.get('/legacy-app', (_req, res) => res.sendFile(path.join(publicDir, 'legacy-app.html')));
 app.use(express.static(publicDir, { extensions: ['html'], maxAge: '5m' }));
 app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 app.use((error, _req, res, _next) => {

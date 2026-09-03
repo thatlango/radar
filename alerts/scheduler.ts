@@ -25,6 +25,8 @@ interface AlertOpportunity {
   deadline: Date | null;
   sourceUrl: string;
   source?: string;
+  applicationUrl?: string | null;
+  applicationEmail?: string | null;
   description?: string;
   matchScore?: number;
   explanation?: string;
@@ -190,6 +192,8 @@ export class AlertSystem {
         deadline: opp.deadline,
         sourceUrl: opp.sourceUrl,
         source: opp.source,
+        applicationUrl: opp.applicationUrl,
+        applicationEmail: opp.applicationEmail,
         description: opp.aiSummary || opp.description,
         matchScore: score,
         explanation: match?.explanation,
@@ -258,7 +262,8 @@ export class AlertSystem {
     const top = opportunities.slice(0, 5).map((opp, index) => {
       const score = opp.matchScore ? `${Math.round(opp.matchScore)}%` : 'fit';
       const due = opp.deadline ? new Date(opp.deadline).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'open';
-      return `${index + 1}. ${opp.title} — ${opp.organization}\n${score} · ${opp.country} · ${due}\n${opp.sourceUrl}`;
+      const apply = opp.applicationUrl ? opp.applicationUrl : opp.applicationEmail ? `Apply by email: ${opp.applicationEmail}` : 'Open Radar for the application route: https://radar.tukutuku.org/app';
+      return `${index + 1}. ${opp.title} — ${opp.organization}\n${score} · ${opp.country} · ${due}\n${apply}`;
     }).join('\n\n');
     const body = `*Your Radar brief*\n${opportunities.length} new opportunities matched what you are looking for.\n\n${top}\n\nOpen Radar for fit notes and next steps: https://radar.tukutuku.org/app`;
     return twilioClient.messages.create({
@@ -283,7 +288,8 @@ export class AlertSystem {
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start"><div><h3 style="margin:0 0 6px;font-size:17px;color:#111827">${this.escapeHtml(opp.title)}</h3><div style="color:#6b7280">${this.escapeHtml(opp.organization)} · ${this.escapeHtml(opp.country)}</div></div>${score}</div>
         <div style="margin-top:9px;color:#6b7280;font-size:13px">${this.escapeHtml(opp.type)} · Deadline: ${this.escapeHtml(deadline)} · ${this.escapeHtml(opp.source || 'source')}</div>
         ${explanation}
-        <a href="${this.escapeHtml(opp.sourceUrl)}" style="display:inline-block;margin-top:14px;background:#111827;color:#fff;text-decoration:none;padding:9px 14px;border-radius:9px">Open source</a>
+        ${opp.applicationUrl ? `<a href="${this.escapeHtml(opp.applicationUrl)}" style="display:inline-block;margin-top:14px;background:#087263;color:#fff;text-decoration:none;padding:9px 14px;border-radius:9px;font-weight:700">Apply now</a>` : opp.applicationEmail ? `<a href="mailto:${this.escapeHtml(opp.applicationEmail)}?subject=${encodeURIComponent(opp.title)}" style="display:inline-block;margin-top:14px;background:#087263;color:#fff;text-decoration:none;padding:9px 14px;border-radius:9px;font-weight:700">Apply by email</a>` : `<a href="https://radar.tukutuku.org/app" style="display:inline-block;margin-top:14px;background:#111827;color:#fff;text-decoration:none;padding:9px 14px;border-radius:9px">Open in Radar</a>`}
+        <div style="margin-top:10px;font-size:12px"><a href="${this.escapeHtml(opp.sourceUrl)}" style="color:#6b7280;text-decoration:underline">View source / provenance</a></div>
       </div>`;
     }).join('');
     return `<!doctype html><html><body style="margin:0;background:#f5f6f3;font-family:Inter,Arial,sans-serif;color:#111827"><div style="max-width:680px;margin:0 auto;padding:28px 18px">
@@ -316,6 +322,8 @@ export class AlertSystem {
       deadline: opportunity.deadline,
       sourceUrl: opportunity.sourceUrl,
       source: opportunity.source,
+      applicationUrl: opportunity.applicationUrl,
+      applicationEmail: opportunity.applicationEmail,
       description: opportunity.aiSummary || opportunity.description,
       matchScore,
     }], 'instant');
