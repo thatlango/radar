@@ -44,7 +44,13 @@ function score(url:string,label:string,context:string,source:string){
 }
 function directPortal(url:string){const h=host(url);return ATS.some(x=>h===x||h.endsWith(`.${x}`))||(/linkedin\.com$/.test(h)&&/\/jobs\//i.test(url))||/brightermonday\./i.test(h)||/impactpool\.org$/i.test(h)||/euraxess\.ec\.europa\.eu$/i.test(h)||/grants\.gov$/i.test(h)||/ec\.europa\.eu$/i.test(h);}
 function emailOf(text:string){return (clean(text).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig)||[]).find(x=>!/noreply|no-reply|privacy|support|info@jobstoapply/i.test(x));}
-function instructions(text:string){const t=clean(text),i=t.search(APPLY);return i<0?undefined:t.slice(i,i+850);}
+function instructions(text:string){
+  const t=clean(text), i=t.search(APPLY); if(i<0) return undefined;
+  let out=t.slice(i,i+700);
+  const boundary=out.slice(80).search(/(related jobs?|other opportunities|share this|newsletter|subscribe|about us|comments?|latest posts?|you may also like|recommended)/i);
+  if(boundary>=0) out=out.slice(0,boundary+80);
+  return out.replace(/\s+/g,' ').trim().slice(0,600) || undefined;
+}
 
 export async function resolveApplicationDestination(sourceUrl:string,seedText=''):Promise<ApplicationDestination>{
   if(directPortal(sourceUrl)) return {applicationUrl:sourceUrl,confidence:0.72};

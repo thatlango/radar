@@ -86,12 +86,12 @@ export async function api(path, options = {}) {
 }
 
 export const list = (value) => String(value || '').split(',').map((v) => v.trim()).filter(Boolean);
-export const fmtDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Open deadline';
+export const fmtDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : 'Not listed';
 export const fmtDateTime = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '';
 export const daysUntil = (value) => value ? Math.ceil((new Date(value).getTime() - Date.now()) / 86400000) : null;
 export const deadlineLabel = (value) => {
   const days = daysUntil(value);
-  if (days === null) return 'Open deadline';
+  if (days === null) return 'No deadline listed';
   if (days < 0) return 'Closed';
   if (days === 0) return 'Closes today';
   if (days === 1) return '1 day left';

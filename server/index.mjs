@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import pdfParse from 'pdf-parse';
+import nodemailer from 'nodemailer';
 import {
   RADAR_PLANS,
   coreSubscriptionCatalog,
@@ -26,6 +27,13 @@ const CLIENT_ID = 'radar-web';
 const REDIRECT_URI = process.env.RADAR_REDIRECT_URI || 'https://radar.tukutuku.org/auth/tuku/callback';
 const SESSION_TTL_HOURS = Math.max(1, Math.min(168, Number(process.env.SESSION_TTL_HOURS || 24)));
 const COOKIE = 'radar_session';
+const emailTransporter = process.env.SMTP_HOST ? nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+  auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+}) : null;
+const RADAR_FROM = process.env.RADAR_ALERT_FROM || 'Radar <radar@tukutuku.org>';
 
 const SCAN_PRESETS = [
   { id: 'consulting-firm', name: 'Consulting & implementation opportunities', description: 'Firm, framework, roster and consortium opportunities across programme design, implementation, research, capacity building, private sector development, digital systems and MEL.' },
@@ -442,8 +450,8 @@ async function upsertDailyAlert(userId, preferences) {
   if (existing) return prisma.alert.update({ where: { id: existing.id }, data });
   return prisma.alert.create({ data: { userId, ...data } });
 }
-async function briefingPreview(user) {
-  const prefs = safePrefs(user);
+async function briefingPreview(user, overrides = {}) {
+  const prefs = { ...safePrefs(user), ...safeJson(overrides) };
   const minDays = Math.max(0, Math.min(60, Number(prefs.minDaysToDeadline ?? 7)));
   const minFit = Math.max(0, Math.min(100, Number(prefs.minFitScore ?? 60)));
   const now = new Date();
@@ -547,6 +555,23 @@ async function enqueueUserRematch(userId) {
 }
 async function createNotification(userId, type, title, body, metadata = {}) {
   return prisma.notification.create({ data: { userId, type, title: String(title).slice(0, 180), body: String(body).slice(0, 4000), metadata } }).catch(() => null);
+}
+function htmlEscape(value) {
+  return String(value || '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+async function sendWorkspaceInviteEmail({ email, inviter, workspace, role }) {
+  if (!emailTransporter || !email) return { delivered: false, reason: 'smtp_unavailable' };
+  const title = compactOpportunityTitle(workspace?.opportunity?.title || workspace?.name || 'Radar application workspace');
+  const organisation = cleanOpportunityText(workspace?.opportunity?.organization || '');
+  const url = `https://radar.tukutuku.org/app?workspace=${encodeURIComponent(workspace.id)}`;
+  await emailTransporter.sendMail({
+    from: RADAR_FROM,
+    to: email,
+    subject: `${inviter || 'A teammate'} invited you to a Radar workspace`,
+    text: `${inviter || 'A teammate'} invited you as ${role} to work on ${title}${organisation ? ` for ${organisation}` : ''}. Open Radar: ${url}. Sign in with this email address to access the workspace.`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#173247"><p style="font-size:12px;font-weight:700;letter-spacing:.08em;color:#087263">RADAR · TEAM REVIEW</p><h2 style="font-size:24px;margin:8px 0">You have been invited to an application workspace</h2><p><strong>${htmlEscape(inviter || 'A teammate')}</strong> invited you as <strong>${htmlEscape(role)}</strong> to help prepare:</p><div style="padding:16px;border-radius:14px;background:#f2f7f6"><strong>${htmlEscape(title)}</strong>${organisation ? `<div style="margin-top:4px;color:#647485">${htmlEscape(organisation)}</div>` : ''}</div><p style="margin:18px 0">Sign in to Radar with <strong>${htmlEscape(email)}</strong>. Access is tied to the invited email address.</p><a href="${htmlEscape(url)}" style="display:inline-block;background:#087263;color:#fff;text-decoration:none;padding:11px 16px;border-radius:10px;font-weight:700">Open workspace</a><p style="margin-top:22px;color:#7a8795;font-size:12px">Radar keeps drafting, evidence and review activity inside the workspace. External submission remains user-controlled.</p></div>`,
+  });
+  return { delivered: true };
 }
 async function libraryContext(userId, limit = 10) {
   const docs = await prisma.userDocument.findMany({ where: { userId }, orderBy: { updatedAt: 'desc' }, take: limit });
@@ -930,7 +955,7 @@ app.delete('/api/me/resume', requireSession, async (req, res, next) => {
 app.get('/api/me/briefing', requireSession, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
   const alert = await prisma.alert.findFirst({ where: { userId: req.radarSession.userId, frequency: 'daily' } });
-  res.json({ preferences: safePrefs(user), alert: alert ? { id: alert.id, active: alert.active, lastSent: alert.lastSent, sendCount: alert.sendCount } : null });
+  res.json({ phone: user?.phone || null, preferences: safePrefs(user), alert: alert ? { id: alert.id, active: alert.active, lastSent: alert.lastSent, sendCount: alert.sendCount } : null });
 });
 app.put('/api/me/briefing', requireSession, async (req, res, next) => {
   try {
@@ -940,12 +965,25 @@ app.put('/api/me/briefing', requireSession, async (req, res, next) => {
     const preferences = { ...oldPrefs, dailyBriefEnabled: input.enabled !== false, deliveryHour, timezone: String(input.timezone || oldPrefs.timezone || 'Africa/Kampala').slice(0, 80), emailBrief: input.email !== false, whatsappBrief: input.whatsapp === true, minFitScore: Math.max(0, Math.min(100, Number(input.minFitScore ?? oldPrefs.minFitScore ?? 60))), minDaysToDeadline: Math.max(0, Math.min(60, Number(input.minDaysToDeadline ?? oldPrefs.minDaysToDeadline ?? 7))) };
     const user = await prisma.user.update({ where: { id: req.radarSession.userId }, data: { phone: input.phone !== undefined ? String(input.phone || '').trim().slice(0, 40) || null : current?.phone, preferences } });
     const alert = await upsertDailyAlert(user.id, preferences);
-    res.json({ preferences, alert: { id: alert.id, active: alert.active, lastSent: alert.lastSent, sendCount: alert.sendCount } });
+    res.json({ phone: user.phone || null, preferences, alert: { id: alert.id, active: alert.active, lastSent: alert.lastSent, sendCount: alert.sendCount } });
   } catch (error) { next(error); }
 });
 app.get('/api/me/briefing/preview', requireSession, async (req, res, next) => {
   try { const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } }); res.json({ items: await briefingPreview(user) }); }
   catch (error) { next(error); }
+});
+app.post('/api/me/briefing/preview', requireSession, async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.radarSession.userId } });
+    const input = req.body || {};
+    const overrides = {
+      minFitScore: Math.max(0, Math.min(100, Number(input.minFitScore ?? 60))),
+      minDaysToDeadline: Math.max(0, Math.min(60, Number(input.minDaysToDeadline ?? 7))),
+      types: Array.isArray(input.types) ? cleanList(input.types, 20) : undefined,
+      remote: input.remote === true,
+    };
+    res.json({ items: await briefingPreview(user, overrides), preview: true });
+  } catch (error) { next(error); }
 });
 
 app.post('/api/opportunities/:id/save', requireSession, async (req, res) => {
@@ -961,7 +999,8 @@ app.get('/api/me/saved', requireSession, async (req, res) => {
 });
 app.get('/api/me/applications', requireSession, async (req, res) => {
   const rows = await prisma.application.findMany({ where: { userId: req.radarSession.userId }, include: { opportunity: true }, orderBy: { updatedAt: 'desc' } });
-  res.json({ items: rows.map((x) => ({ id: x.id, status: x.status, notes: x.notes, coverLetter: x.coverLetter, aiGenerated: x.aiGenerated, appliedAt: x.appliedAt, updatedAt: x.updatedAt, opportunity: opportunityView(x.opportunity) })) });
+  const workspaceMap = new Map((await prisma.opportunityWorkspace.findMany({ where: { userId: req.radarSession.userId, opportunityId: { in: rows.map((x) => x.opportunityId) } }, select: { id: true, opportunityId: true, status: true, progress: true } })).map((x) => [x.opportunityId, x]));
+  res.json({ items: rows.map((x) => ({ id: x.id, status: x.status, notes: x.notes, coverLetter: x.coverLetter, aiGenerated: x.aiGenerated, appliedAt: x.appliedAt, updatedAt: x.updatedAt, workspaceId: workspaceMap.get(x.opportunityId)?.id || null, workspaceStatus: workspaceMap.get(x.opportunityId)?.status || null, workspaceProgress: workspaceMap.get(x.opportunityId)?.progress ?? null, opportunity: opportunityView(x.opportunity) })) });
 });
 app.post('/api/opportunities/:id/applications', requireSession, async (req, res) => {
   const status = APPLICATION_STATUSES.has(String(req.body?.status)) ? String(req.body.status) : 'planning';
@@ -1248,16 +1287,26 @@ app.patch('/api/workspaces/:id/comments/:commentId', requireSession, async (req,
 });
 app.post('/api/workspaces/:id/members', requireSession, async (req, res, next) => {
   try {
-    const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id);
+    const workspace = await accessibleWorkspace(req.radarSession.userId, req.params.id, { opportunity: true });
     if (!workspace) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Workspace not found.' } });
     requireWorkspaceRole(workspace, req.radarSession.userId, ['owner']);
     await enforceLimit({ prisma, session: req.radarSession, metric: 'collaboration' });
     const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 240);
     if (!email.includes('@')) return res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'A valid collaborator email is required.' } });
+    if (email === String(req.radarSession.user.email || '').toLowerCase()) return res.status(409).json({ error: { code: 'ALREADY_OWNER', message: 'You already own this workspace.' } });
     const role = MEMBER_ROLES.has(String(req.body?.role)) ? String(req.body.role) : 'reviewer';
     const knownUser = await prisma.user.findUnique({ where: { email } });
-    const member = await prisma.workspaceMember.upsert({ where: { workspaceId_email: { workspaceId: workspace.id, email } }, update: { role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null }, create: { workspaceId: workspace.id, email, role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null, status: knownUser ? 'active' : 'invited' } });
-    res.json(member);
+    const status = knownUser ? 'accepted' : 'invited';
+    const member = await prisma.workspaceMember.upsert({
+      where: { workspaceId_email: { workspaceId: workspace.id, email } },
+      update: { role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null, status },
+      create: { workspaceId: workspace.id, email, role, name: String(req.body?.name || knownUser?.name || '').slice(0, 120) || null, userId: knownUser?.id || null, status },
+    });
+    if (knownUser) await createNotification(knownUser.id, 'workspace_invite', 'You were added to a Radar workspace', `${req.radarSession.user.name || req.radarSession.user.email} added you as ${role} to ${compactOpportunityTitle(workspace.opportunity?.title || workspace.name)}.`, { workspaceId: workspace.id, opportunityId: workspace.opportunityId, role });
+    let delivery = { delivered: false, reason: 'not_attempted' };
+    try { delivery = await sendWorkspaceInviteEmail({ email, inviter: req.radarSession.user.name || req.radarSession.user.email, workspace, role }); }
+    catch (mailError) { console.warn('[radar] workspace invite email failed', mailError?.message || mailError); delivery = { delivered: false, reason: 'send_failed' }; }
+    res.json({ member, delivery });
   } catch (error) { next(error); }
 });
 app.post('/api/workspaces/:id/ai/team-summary', requireSession, async (req, res, next) => {
