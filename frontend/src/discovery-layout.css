@@ -1,0 +1,297 @@
+/* ==========================================================================
+   RADAR DISCOVERY BROWSE LAYOUT
+   Horizontal filter toolbar + full-width feed + centered detail modal.
+   Loaded after refinement-ui.css.
+   ========================================================================== */
+
+/* Collapse the old three-column discovery layout into a browsing stack. */
+.discovery-shell {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
+  gap: 18px !important;
+  align-items: stretch !important;
+  width: 100%;
+}
+
+/* The former left filter rail becomes a single compact toolbar. */
+.discovery-shell > .filter-rail {
+  position: static !important;
+  top: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 86px !important;
+  display: grid !important;
+  grid-template-columns:
+    minmax(120px, .65fr)
+    minmax(145px, .8fr)
+    minmax(190px, 1.1fr)
+    minmax(120px, .65fr)
+    minmax(145px, .75fr)
+    auto
+    auto !important;
+  gap: 12px !important;
+  align-items: end !important;
+  padding: 14px 16px !important;
+  border: 0 !important;
+  border-radius: 18px !important;
+  background: #fff !important;
+  box-shadow: 0 3px 14px rgba(20, 36, 58, .05) !important;
+}
+
+.discovery-shell > .filter-rail .filter-head {
+  min-height: 50px;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 0 6px 0 0 !important;
+  border: 0 !important;
+}
+
+.discovery-shell > .filter-rail .filter-head > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.discovery-shell > .filter-rail .filter-head strong {
+  font-size: 12px !important;
+  white-space: nowrap;
+}
+
+.discovery-shell > .filter-rail .filter-head > button {
+  margin-left: auto;
+  padding: 6px 8px !important;
+  font-size: 10px !important;
+}
+
+.discovery-shell > .filter-rail > label:not(.checkline) {
+  display: grid !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  color: #6a7888 !important;
+  font-size: 10px !important;
+  font-weight: 750 !important;
+  line-height: 1.1;
+}
+
+.discovery-shell > .filter-rail > label:not(.checkline) input,
+.discovery-shell > .filter-rail > label:not(.checkline) select {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  margin: 0 !important;
+  padding: 0 11px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: #f3f5f8 !important;
+  color: #20354a !important;
+  box-shadow: inset 0 0 0 1px rgba(27,47,70,.04) !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+}
+
+.discovery-shell > .filter-rail > label:not(.checkline) input:focus,
+.discovery-shell > .filter-rail > label:not(.checkline) select:focus {
+  outline: none !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 3px rgba(0,125,111,.10), inset 0 0 0 1px #007d6f !important;
+}
+
+/* Checkbox filters become pill toggles. */
+.discovery-shell > .filter-rail .checkline {
+  min-height: 42px;
+  margin: 0 !important;
+  align-self: end;
+}
+
+.discovery-shell > .filter-rail .checkline > span {
+  height: 40px !important;
+  padding: 0 11px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: #f3f5f8 !important;
+  color: #667487 !important;
+  white-space: nowrap;
+  box-shadow: none !important;
+}
+
+.discovery-shell > .filter-rail .checkline input:checked + span {
+  background: #e4f5ef !important;
+  color: #087263 !important;
+  box-shadow: inset 0 0 0 1px rgba(0,125,111,.08) !important;
+}
+
+.discovery-shell > .filter-rail .filter-tip {
+  display: none !important;
+}
+
+/* Feed gets all remaining width. */
+.discovery-shell > .feed-column {
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 22px !important;
+  border: 0 !important;
+  border-radius: 20px !important;
+  background: #fff !important;
+  box-shadow: 0 3px 14px rgba(20,36,58,.05) !important;
+}
+
+.discovery-shell > .feed-column .opportunity-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+}
+
+.discovery-shell > .feed-column .opportunity-card {
+  min-width: 0 !important;
+  min-height: 268px !important;
+}
+
+/* Keep long content visually tidy while scanning. */
+.discovery-shell > .feed-column .opportunity-card h3,
+.discovery-shell > .feed-column .opportunity-card > p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.discovery-shell > .feed-column .opportunity-card h3 { -webkit-line-clamp: 3; }
+.discovery-shell > .feed-column .opportunity-card > p { -webkit-line-clamp: 3; }
+
+/* The detail drawer is reinterpreted as a centered modal. */
+.detail-scrim {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 120 !important;
+  border: 0 !important;
+  background: rgba(10, 23, 38, .45) !important;
+  backdrop-filter: blur(4px);
+}
+
+.opportunity-panel.detail-drawer {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: min(900px, calc(100vw - 64px)) !important;
+  max-width: 900px !important;
+  height: auto !important;
+  max-height: min(88vh, 900px) !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 130 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  border-radius: 24px !important;
+  background: #fff !important;
+  box-shadow: 0 30px 90px rgba(10,25,42,.24) !important;
+}
+
+.opportunity-panel.detail-drawer .detail-scroll {
+  max-height: min(88vh, 900px) !important;
+  overflow-y: auto !important;
+  padding: 30px 34px 38px !important;
+  scrollbar-gutter: stable;
+}
+
+.opportunity-panel.detail-drawer .drawer-close {
+  position: absolute !important;
+  top: 20px !important;
+  right: 20px !important;
+  z-index: 5 !important;
+  width: 42px !important;
+  height: 42px !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: #f2f5f8 !important;
+  color: #193149 !important;
+  cursor: pointer;
+}
+
+.opportunity-panel.detail-drawer .detail-kicker {
+  padding-right: 56px;
+}
+
+.opportunity-panel.detail-drawer h2 {
+  max-width: 760px;
+  padding-right: 42px;
+}
+
+.opportunity-panel.detail-drawer .detail-metrics {
+  max-width: 700px;
+}
+
+@media (max-width: 1400px) {
+  .discovery-shell > .filter-rail {
+    grid-template-columns:
+      minmax(110px, .65fr)
+      minmax(135px, .8fr)
+      minmax(175px, 1fr)
+      minmax(110px, .65fr)
+      minmax(135px, .75fr)
+      auto !important;
+  }
+
+  .discovery-shell > .filter-rail .filter-head {
+    display: none !important;
+  }
+}
+
+@media (max-width: 1120px) {
+  .discovery-shell > .filter-rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .discovery-shell > .filter-rail .checkline {
+    grid-column: span 2;
+  }
+
+  .discovery-shell > .feed-column .opportunity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .discovery-shell > .filter-rail {
+    grid-template-columns: 1fr 1fr !important;
+    padding: 12px !important;
+  }
+
+  .discovery-shell > .filter-rail .checkline {
+    grid-column: auto;
+  }
+
+  .discovery-shell > .feed-column {
+    padding: 14px !important;
+  }
+
+  .discovery-shell > .feed-column .opportunity-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .opportunity-panel.detail-drawer {
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    transform: none !important;
+    border-radius: 0 !important;
+  }
+
+  .opportunity-panel.detail-drawer .detail-scroll {
+    max-height: 100dvh !important;
+    padding: 24px 18px 36px !important;
+  }
+
+  .opportunity-panel.detail-drawer .drawer-close {
+    top: 14px !important;
+    right: 14px !important;
+  }
+}
