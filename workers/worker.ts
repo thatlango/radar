@@ -60,6 +60,10 @@ async function fail(job: any, error: any): Promise<void> {
       lastError: String(error?.stack || error?.message || error).slice(0, 12000),
     },
   });
+  if (terminal && job.type === 'resolve_application') {
+    const opportunityId = String((job.payload as any)?.opportunityId || '');
+    if (opportunityId) await prisma.opportunity.updateMany({ where: { id: opportunityId }, data: { applicationVerifiedAt: new Date() } }).catch(() => undefined);
+  }
 }
 
 async function recoverStuckJobs(): Promise<void> {

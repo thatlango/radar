@@ -135,7 +135,7 @@ export abstract class BaseScraper {
       await prisma.radarJob.upsert({
         where: { dedupeKey: `resolve-application:${row.id}` },
         create: { type: 'resolve_application', payload: { opportunityId: row.id }, dedupeKey: `resolve-application:${row.id}`, status: 'queued' },
-        update: { status: 'queued', runAt: now, completedAt: null, lastError: null },
+        update: { status: 'queued', runAt: now, completedAt: null, lockedAt: null, lastError: null, attempts: 0 },
       }).catch(() => null);
     }
     return inserted;
