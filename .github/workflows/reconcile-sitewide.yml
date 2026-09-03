@@ -1,0 +1,33 @@
+name: Radar sitewide reconciliation
+
+on:
+  push:
+    branches:
+      - reconcile/radar-sitewide-20260903
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch verified production patch
+        run: |
+          curl -fsS https://radar.tukutuku.org/radar-sitewide-final.patch -o /tmp/radar-sitewide-final.patch
+          echo "3f8f005b70de046fa1431a4bfa4ff4f725b06c7769ebbe6b29592b0f26106c7c  /tmp/radar-sitewide-final.patch" | sha256sum -c -
+      - name: Apply production delta
+        run: |
+          git apply --check /tmp/radar-sitewide-final.patch
+          git apply /tmp/radar-sitewide-final.patch
+      - name: Commit reconciled source
+        run: |
+          rm -f .github/workflows/reconcile-sitewide.yml .sitewide-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Reconcile sitewide Radar hardening from production"
+          git push origin HEAD:reconcile/radar-sitewide-20260903
