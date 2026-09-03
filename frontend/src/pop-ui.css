@@ -1,0 +1,660 @@
+/* ========================================================================== 
+   RADAR POP UI V2
+   Vivid operational design: borderless cards, strong colour accents,
+   crisp white surfaces, soft depth and confident action states.
+   Loaded after clean-ui.css.
+   ========================================================================== */
+
+:root {
+  --pop-blue: #3155f5;
+  --pop-violet: #5840f5;
+  --pop-teal: #24c39a;
+  --pop-coral: #ff6b45;
+  --pop-amber: #ffbf1f;
+  --pop-pink: #cf6b9e;
+  --pop-sky: #4aa8df;
+  --pop-ink: #14243a;
+  --pop-canvas: #f2f5fb;
+  --pop-shadow: 0 14px 34px rgba(27, 47, 80, .08);
+  --pop-shadow-soft: 0 7px 20px rgba(27, 47, 80, .06);
+  --pop-shadow-hover: 0 18px 40px rgba(27, 47, 80, .12);
+}
+
+html,
+body,
+#root,
+.radar-app {
+  background: var(--pop-canvas) !important;
+}
+
+/* ---------- Shell ---------- */
+.sidebar {
+  background: #142642 !important;
+  box-shadow: 12px 0 32px rgba(13, 31, 56, .08);
+}
+
+.nav-button {
+  border-radius: 14px !important;
+}
+
+.nav-button.active {
+  background: rgba(255,255,255,.10) !important;
+  box-shadow: none !important;
+}
+
+.nav-button.active svg {
+  color: var(--pop-amber) !important;
+}
+
+.new-search-btn {
+  background: var(--pop-blue) !important;
+  color: #fff !important;
+  border: 0 !important;
+  box-shadow: 0 10px 24px rgba(49,85,245,.28) !important;
+}
+
+.new-search-btn:hover {
+  background: #2448e8 !important;
+}
+
+.radar-mark {
+  border-color: var(--pop-amber) !important;
+}
+.radar-mark span:first-child { border-color: var(--pop-amber) !important; }
+.radar-mark span:nth-child(2),
+.radar-mark i { background: var(--pop-amber) !important; }
+
+/* ---------- Topbar ---------- */
+.topbar {
+  background: rgba(242,245,251,.92) !important;
+  border-bottom: 0 !important;
+  box-shadow: 0 1px 0 rgba(20,36,58,.035);
+}
+
+.global-search,
+.account-pill,
+.icon-btn {
+  border: 0 !important;
+  box-shadow: 0 4px 14px rgba(27,47,80,.055) !important;
+}
+
+.icon-btn.ai-btn {
+  background: var(--pop-violet) !important;
+  color: #fff !important;
+}
+
+/* ---------- Page surfaces ---------- */
+.feed-column,
+.filter-rail,
+.opportunity-panel,
+.surface-panel,
+.settings-card,
+.document-form,
+.current-plan,
+.plan-card,
+.workspace-list,
+.stage-rail,
+.pipeline-board > section {
+  border: 0 !important;
+  box-shadow: var(--pop-shadow-soft) !important;
+}
+
+.feed-column {
+  background: #fff !important;
+  padding: 20px !important;
+  border-radius: 22px !important;
+}
+
+.filter-rail,
+.opportunity-panel,
+.workspace-list,
+.surface-panel,
+.settings-card,
+.document-form,
+.current-plan,
+.plan-card,
+.stage-rail {
+  background: #fff !important;
+}
+
+/* ---------- Stat cards: vivid dashboard moments ---------- */
+.stats-row {
+  gap: 16px !important;
+}
+
+.stat-card {
+  border: 0 !important;
+  box-shadow: var(--pop-shadow-soft) !important;
+  min-height: 112px !important;
+  padding: 18px !important;
+  overflow: hidden;
+  position: relative;
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  right: -54px;
+  bottom: -72px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.12);
+}
+
+.stat-card.gold {
+  background: linear-gradient(135deg, #3155f5 0%, #4b36ee 100%) !important;
+  color: #fff !important;
+}
+
+.stat-card.teal {
+  background: linear-gradient(135deg, #23bf99 0%, #16a77f 100%) !important;
+  color: #fff !important;
+}
+
+.stat-card.pumpkin {
+  background: linear-gradient(135deg, #ff7651 0%, #ff5e3a 100%) !important;
+  color: #fff !important;
+}
+
+.stat-card.chartreuse {
+  background: linear-gradient(135deg, #ffd12d 0%, #ffb712 100%) !important;
+  color: #253145 !important;
+}
+
+.stat-card.gold span,
+.stat-card.gold small,
+.stat-card.gold strong,
+.stat-card.gold svg,
+.stat-card.teal span,
+.stat-card.teal small,
+.stat-card.teal strong,
+.stat-card.teal svg,
+.stat-card.pumpkin span,
+.stat-card.pumpkin small,
+.stat-card.pumpkin strong,
+.stat-card.pumpkin svg {
+  color: #fff !important;
+}
+
+.stat-card.chartreuse span,
+.stat-card.chartreuse small,
+.stat-card.chartreuse strong,
+.stat-card.chartreuse svg {
+  color: #253145 !important;
+}
+
+.stat-icon {
+  background: rgba(255,255,255,.20) !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+}
+
+.stat-card.chartreuse .stat-icon {
+  background: rgba(255,255,255,.42) !important;
+}
+
+.stat-card strong {
+  font-size: 26px !important;
+}
+
+/* ---------- Opportunity cards ---------- */
+.opportunity-grid {
+  gap: 16px !important;
+}
+
+.opportunity-card {
+  background: #fff !important;
+  border: 0 !important;
+  box-shadow: var(--pop-shadow-soft) !important;
+  border-radius: 18px !important;
+  overflow: hidden;
+  min-height: 252px !important;
+  transition: transform .18s ease, box-shadow .18s ease !important;
+}
+
+.opportunity-card::before {
+  content: none !important;
+}
+
+.opportunity-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  border-radius: 18px 18px 0 0;
+  background: #dfe5eb;
+}
+
+.opportunity-card.tone-peach::after { background: var(--pop-coral) !important; }
+.opportunity-card.tone-mint::after { background: var(--pop-teal) !important; }
+.opportunity-card.tone-lavender::after { background: var(--pop-violet) !important; }
+.opportunity-card.tone-sky::after { background: var(--pop-sky) !important; }
+.opportunity-card.tone-rose::after { background: var(--pop-pink) !important; }
+.opportunity-card.tone-sand::after { background: #d49a34 !important; }
+
+.opportunity-card:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: var(--pop-shadow-hover) !important;
+}
+
+.opportunity-card.selected {
+  border: 0 !important;
+  box-shadow: 0 0 0 2px rgba(49,85,245,.18), 0 18px 40px rgba(27,47,80,.13) !important;
+}
+
+.card-company {
+  color: #738196 !important;
+}
+
+.opportunity-card h3 {
+  color: var(--pop-ink) !important;
+  font-weight: 750 !important;
+}
+
+.card-tags span {
+  background: #f3f5f8 !important;
+  border: 0 !important;
+  color: #405065 !important;
+}
+
+.trust-pill {
+  background: #eff8f4 !important;
+  color: #1b604d !important;
+  border: 0 !important;
+}
+
+.bookmark-dot {
+  background: #f4f6fa !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.bookmark-dot:hover {
+  background: #eaf0ff !important;
+  color: var(--pop-blue) !important;
+}
+
+.fit-orb {
+  border-radius: 14px !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.fit-orb.excellent {
+  background: #dff8eb !important;
+  color: #176c4f !important;
+}
+
+.fit-orb.good {
+  background: #e8f1ff !important;
+  color: #3155f5 !important;
+}
+
+.fit-orb.watch {
+  background: #fff0e6 !important;
+  color: #c95b29 !important;
+}
+
+/* ---------- Opportunity detail ---------- */
+.opportunity-panel {
+  box-shadow: var(--pop-shadow) !important;
+}
+
+.detail-metrics > div,
+.evidence-grid > div,
+.track-box,
+.source-link,
+.ai-action-grid button {
+  border: 0 !important;
+  background: #f5f7fb !important;
+}
+
+.ai-action-grid button:hover {
+  background: #eef1ff !important;
+  color: var(--pop-blue) !important;
+}
+
+.ai-result {
+  background: linear-gradient(135deg, #3155f5 0%, #5a3df0 100%) !important;
+  box-shadow: 0 12px 26px rgba(66,70,238,.20) !important;
+}
+
+.ai-result > div,
+.ai-result p {
+  color: #fff !important;
+}
+
+.info-box.warning {
+  background: #fff0e8 !important;
+  color: #8f4728 !important;
+}
+
+.info-box.teal {
+  background: #e8f8f3 !important;
+  color: #17624f !important;
+}
+
+/* ---------- Buttons ---------- */
+.button {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.button.dark {
+  background: #162944 !important;
+  color: #fff !important;
+}
+
+.button.gold {
+  background: var(--pop-blue) !important;
+  color: #fff !important;
+  box-shadow: 0 7px 18px rgba(49,85,245,.22) !important;
+}
+
+.button.gold:hover:not(:disabled) {
+  background: #2448e8 !important;
+}
+
+.button.ghost,
+.compact-btn {
+  border: 0 !important;
+  background: #f1f4f8 !important;
+  color: #253950 !important;
+}
+
+.compact-btn:hover,
+.button.ghost:hover:not(:disabled) {
+  background: #e8edf4 !important;
+}
+
+/* ---------- Filters and forms ---------- */
+.filter-rail input:not([type=checkbox]),
+.filter-rail select,
+.document-form input,
+.document-form select,
+.document-form textarea,
+.settings-card input:not([type=checkbox]),
+.settings-card select,
+.settings-card textarea,
+.auth-modal input,
+.document-editor textarea,
+.invite-row input,
+.invite-row select,
+.comment-input input,
+.chat-form textarea {
+  border: 0 !important;
+  background: #f4f6fa !important;
+  box-shadow: inset 0 0 0 1px rgba(34,52,75,.04) !important;
+}
+
+.filter-rail input:focus,
+.filter-rail select:focus,
+.document-form input:focus,
+.document-form select:focus,
+.document-form textarea:focus,
+.settings-card input:focus,
+.settings-card select:focus,
+.settings-card textarea:focus,
+.auth-modal input:focus,
+.document-editor textarea:focus,
+.chat-form textarea:focus {
+  box-shadow: 0 0 0 3px rgba(49,85,245,.12) !important;
+  background: #fff !important;
+}
+
+.checkline > span,
+.switchline,
+.channel-row label {
+  border: 0 !important;
+}
+
+.checkline input:checked + span {
+  background: #e7f8f1 !important;
+  color: #17684f !important;
+}
+
+/* ---------- Workspace ---------- */
+.workspace-list-card {
+  border: 0 !important;
+  background: #f5f7fa !important;
+  box-shadow: none !important;
+}
+
+.workspace-list-card:hover {
+  background: #edf1f7 !important;
+}
+
+.workspace-list-card.active {
+  background: #eef1ff !important;
+  color: #273d82 !important;
+  box-shadow: inset 4px 0 0 var(--pop-blue) !important;
+}
+
+.mini-progress i {
+  background: var(--pop-blue) !important;
+}
+
+.workspace-hero {
+  background: linear-gradient(135deg, #3155f5 0%, #5539ed 100%) !important;
+  box-shadow: 0 18px 40px rgba(58,65,226,.20) !important;
+}
+
+.workspace-hero .eyebrow {
+  color: #dfe4ff !important;
+}
+
+.progress-ring {
+  border-color: rgba(255,255,255,.18) !important;
+  border-top-color: #6cf0c2 !important;
+}
+
+.stage-rail .done span {
+  background: var(--pop-teal) !important;
+  color: #fff !important;
+}
+
+.ai-plan-panel {
+  background: linear-gradient(145deg, #eef1ff, #f7f6ff) !important;
+}
+
+.doc-tabs button {
+  border: 0 !important;
+  background: #f4f6fa !important;
+}
+
+.doc-tabs button.active {
+  background: #e9edff !important;
+  color: #3147b8 !important;
+  box-shadow: inset 0 0 0 1px rgba(49,85,245,.10) !important;
+}
+
+/* ---------- Applications ---------- */
+.pipeline-board > section {
+  background: #eef2f7 !important;
+}
+
+.pipeline-board article {
+  border: 0 !important;
+  box-shadow: 0 5px 14px rgba(27,47,80,.055) !important;
+}
+
+.status-chip.ready,
+.status-chip.approved,
+.status-chip.complete,
+.status-chip.offer {
+  background: #def8e9 !important;
+  color: #17684f !important;
+}
+
+.status-chip.review,
+.status-chip.interview {
+  background: #fff0ca !important;
+  color: #7f5d09 !important;
+}
+
+.status-chip.submitted,
+.status-chip.applied {
+  background: #e7ecff !important;
+  color: #3155f5 !important;
+}
+
+/* ---------- Documents & analytics ---------- */
+.library-card,
+.analytics-card {
+  border: 0 !important;
+  box-shadow: var(--pop-shadow-soft) !important;
+  background: #fff !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.library-card::before,
+.analytics-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: var(--pop-blue);
+}
+
+.library-card.tone-peach::before,
+.analytics-card.tone-peach::before { background: var(--pop-coral); }
+.library-card.tone-mint::before,
+.analytics-card.tone-mint::before { background: var(--pop-teal); }
+.library-card.tone-lavender::before,
+.analytics-card.tone-lavender::before { background: var(--pop-violet); }
+.library-card.tone-sky::before,
+.analytics-card.tone-sky::before { background: var(--pop-sky); }
+.library-card.tone-rose::before,
+.analytics-card.tone-rose::before { background: var(--pop-pink); }
+.library-card.tone-sand::before,
+.analytics-card.tone-sand::before { background: #d49a34; }
+
+.library-card:hover,
+.analytics-card:hover {
+  box-shadow: var(--pop-shadow-hover) !important;
+}
+
+.bar-chart i {
+  background: linear-gradient(90deg, var(--pop-blue), var(--pop-violet)) !important;
+}
+
+/* ---------- Profile/settings ---------- */
+.file-drop {
+  border: 0 !important;
+  background: #f4f6fa !important;
+}
+
+.file-drop svg {
+  color: var(--pop-blue) !important;
+}
+
+.briefing-card {
+  background: linear-gradient(145deg, #f0f8f5, #f7fbfa) !important;
+}
+
+.notification-list article {
+  border-bottom-color: #eef1f5 !important;
+}
+
+.notification-list article.unread > span {
+  background: var(--pop-coral) !important;
+}
+
+/* ---------- Pricing ---------- */
+.pricing-hero {
+  background: linear-gradient(135deg, #192c4b 0%, #3155f5 56%, #5a3bf0 100%) !important;
+  box-shadow: 0 20px 44px rgba(47,67,185,.18) !important;
+}
+
+.pricing-hero::after {
+  border-color: rgba(255,255,255,.18) !important;
+}
+
+.plan-card.featured {
+  background: linear-gradient(155deg, #fff 0%, #f3f1ff 100%) !important;
+  box-shadow: 0 14px 32px rgba(74,62,210,.12) !important;
+}
+
+.plan-ribbon {
+  background: var(--pop-violet) !important;
+  color: #fff !important;
+}
+
+.pricing-note {
+  background: #e8f8f3 !important;
+  color: #175d4c !important;
+}
+
+/* ---------- Modal & AI drawer ---------- */
+.modal-layer {
+  background: rgba(10,24,44,.48) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.auth-modal {
+  border-radius: 22px !important;
+  box-shadow: 0 30px 80px rgba(15,31,59,.22) !important;
+}
+
+.modal-close,
+.drawer-head button {
+  border: 0 !important;
+  background: #f2f4f8 !important;
+}
+
+.ai-drawer {
+  box-shadow: -20px 0 54px rgba(19,36,64,.16) !important;
+}
+
+.ai-context {
+  background: #edf0ff !important;
+  color: #3446a2 !important;
+}
+
+.chat-bubble.assistant {
+  background: #f2f4f8 !important;
+}
+
+.chat-bubble.user {
+  background: linear-gradient(135deg, var(--pop-blue), var(--pop-violet)) !important;
+}
+
+/* ---------- Locked / empty states ---------- */
+.locked-state {
+  background: linear-gradient(145deg, #21385b 0%, #3155f5 55%, #5c3bea 100%) !important;
+  box-shadow: 0 20px 46px rgba(47,68,186,.18) !important;
+}
+
+.locked-state > div {
+  background: rgba(255,255,255,.13) !important;
+  color: #fff !important;
+}
+
+.empty-workspace,
+.empty-grid-card {
+  border: 0 !important;
+  background: rgba(255,255,255,.72) !important;
+  box-shadow: inset 0 0 0 1px rgba(35,52,75,.035) !important;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 860px) {
+  .feed-column {
+    padding: 16px !important;
+  }
+
+  .stat-card {
+    min-height: 104px !important;
+  }
+}
+
+@media (max-width: 620px) {
+  .stats-row {
+    gap: 12px !important;
+  }
+
+  .opportunity-card {
+    min-height: 232px !important;
+  }
+}
