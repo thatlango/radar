@@ -27,7 +27,7 @@ export class IndicoScraper extends BaseScraper {
       $('tr.event td.title a[href^="/event/"]').each((_i, el) => {
         const title = this.cleanText($(el).text());
         const href = String($(el).attr('href') || '');
-        if (!title || !CONFERENCE_SIGNAL.test(title) || !/^\/event\/\d+\/?$/.test(href)) return;
+        if (!title || /^closed\b/i.test(title) || !CONFERENCE_SIGNAL.test(title) || !/^\/event\/\d+\/?$/.test(href)) return;
         const eventUrl = new URL(href, 'https://indico.un.org').toString();
         if (!found.has(eventUrl)) found.set(eventUrl, { title, url: eventUrl });
       });
