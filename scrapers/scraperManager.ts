@@ -63,13 +63,14 @@ export class ScraperManager {
 
     for (const definition of RADAR_SOURCE_CATALOG) {
       const adapter = definition.adapter;
-      const active = ['rss','page','indico','afdb','worldbank','ugandagpp','eufunding','grantsgov','unpartner','brightermonday','impactpool','euraxess','idrc','grandchallenges'].includes(adapter)
+      const adapterActive = ['rss','page','indico','afdb','worldbank','ugandagpp','eufunding','grantsgov','unpartner','brightermonday','impactpool','euraxess','idrc','grandchallenges'].includes(adapter)
         ? true
         : adapter === 'linkedin'
           ? linkedInAvailable
           : adapter === 'search'
             ? searchAvailable
             : false;
+      const active = definition.opportunityFeed === false ? false : adapterActive;
       const config = {
         adapter,
         trust: definition.trust,
@@ -81,6 +82,7 @@ export class ScraperManager {
         organization: definition.organization,
         requireOpportunityKeyword: definition.requireOpportunityKeyword,
         scanProfile: definition.scanProfile || 'all',
+        opportunityMode: definition.opportunityMode || 'broad',
       };
       const row = await prisma.scraperSource.findFirst({ where: { name: definition.name } });
       if (row) {

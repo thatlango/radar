@@ -31,7 +31,7 @@ async function fetchSafe(raw: string) {
   }
   throw new Error('Too many redirects');
 }
-function candidate(raw:string,base:string){try{if(/^mailto:/i.test(raw))return raw;const u=new URL(raw,base);if(!['http:','https:'].includes(u.protocol)||/\.(pdf|docx?|xlsx?|zip)$/i.test(u.pathname))return '';return u.toString();}catch{return '';}}
+function candidate(raw:string,base:string){try{if(/^mailto:/i.test(raw))return raw;const u=new URL(raw,base);if(!['http:','https:'].includes(u.protocol)||/\.(pdf|docx?|xlsx?|zip|js|css|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|mp4|webm)$/i.test(u.pathname))return '';return u.toString();}catch{return '';}}
 function score(url:string,label:string,context:string,source:string){
   const t=clean(`${label} ${context}`).toLowerCase(), h=host(url), sh=host(source);let s=0;
   if(ATS.some(x=>h===x||h.endsWith(`.${x}`)))s+=110;

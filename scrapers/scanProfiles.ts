@@ -24,6 +24,8 @@ export type RadarSourceDefinition = {
   requireOpportunityKeyword?: boolean;
   frequency?: 'hourly' | 'daily' | 'weekly';
   scanProfile?: string;
+  opportunityMode?: 'broad' | 'actionable-only' | 'title-actionable';
+  opportunityFeed?: boolean;
 };
 
 // Radar uses two acquisition layers:
@@ -32,11 +34,11 @@ export type RadarSourceDefinition = {
 export const RADAR_SOURCE_CATALOG: RadarSourceDefinition[] = [
   // Curated opportunity feeds used in the user's manual Radar scans.
   { name: 'Opportunity Desk', domain: 'opportunitydesk.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://opportunitydesk.org/', feedUrl: 'https://opportunitydesk.org/feed/', frequency: 'hourly' },
-  { name: 'ICTworks', domain: 'ictworks.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.ictworks.org/', feedUrl: 'https://www.ictworks.org/feed/', frequency: 'daily' },
-  { name: 'TechCabal', domain: 'techcabal.com', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://techcabal.com/', feedUrl: 'https://techcabal.com/feed/', frequency: 'daily' },
+  { name: 'ICTworks', domain: 'ictworks.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.ictworks.org/', feedUrl: 'https://www.ictworks.org/feed/', frequency: 'daily', opportunityMode: 'title-actionable' },
+  { name: 'TechCabal', domain: 'techcabal.com', discovery: 'secondary', adapter: 'rss', trust: 'curated', baseUrl: 'https://techcabal.com/', feedUrl: 'https://techcabal.com/feed/', frequency: 'daily', opportunityFeed: false },
   { name: 'Opportunities for Africans', domain: 'opportunitiesforafricans.com', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.opportunitiesforafricans.com/', feedUrl: 'https://www.opportunitiesforafricans.com/feed/', frequency: 'hourly' },
   { name: 'fundsforNGOs', domain: 'fundsforngos.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www2.fundsforngos.org/', feedUrl: 'https://www2.fundsforngos.org/feed/', defaultType: 'grant', frequency: 'daily' },
-  { name: 'VC4A', domain: 'vc4a.com', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://vc4a.com/', feedUrl: 'https://vc4a.com/feed/', frequency: 'daily' },
+  { name: 'VC4A', domain: 'vc4a.com', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://vc4a.com/', feedUrl: 'https://vc4a.com/feed/', frequency: 'daily', opportunityMode: 'title-actionable' },
   { name: 'Terra Viva Grants', domain: 'terravivagrants.org', discovery: 'primary', adapter: 'rss', trust: 'curated', baseUrl: 'https://www.terravivagrants.org/', feedUrl: 'https://www.terravivagrants.org/feed/', defaultType: 'grant', frequency: 'daily' },
   { name: 'Opportunities for Youth', domain: 'opportunitiesforyouth.org', discovery: 'secondary', adapter: 'rss', trust: 'curated', baseUrl: 'https://opportunitiesforyouth.org/', feedUrl: 'https://opportunitiesforyouth.org/feed/', frequency: 'daily' },
   { name: 'JobsToApply.com', domain: 'jobstoapply.com', discovery: 'primary', adapter: 'page', trust: 'curated', baseUrl: 'https://jobstoapply.com/', pages: ['https://jobstoapply.com/','https://jobstoapply.com/?ao_page=2','https://jobstoapply.com/?ao_page=3','https://jobstoapply.com/?ao_page=4','https://jobstoapply.com/?ao_page=5','https://jobstoapply.com/?ao_page=6','https://jobstoapply.com/?ao_page=7','https://jobstoapply.com/?ao_page=8'], defaultType: 'job', frequency: 'hourly' },
