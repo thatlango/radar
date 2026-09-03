@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 type FeedItem = { title: string; url: string; description: string; publishedAt?: string };
 
 const OPPORTUNITY_SIGNAL = /\b(apply|application(?:s)?(?: are)? open|call for|deadline|fellowship|scholarship|grant|funding|funded|prize|award|competition|challenge|accelerator|incubator|cohort|internship|trainee(?:ship)?|vacanc(?:y|ies)|hiring|recruit(?:ment|ing)?|consultant|consultancy|tender|procurement|request for proposal|\brfp\b|expression of interest|\beoi\b|request for quotation|\brfq\b|bid invitation|call for proposals?|open call|conference|summit|symposium|call for papers?|call for abstracts?|call for participants?|call for speakers?|travel grant|delegate application|supplier|vendor|pre-?qualification|supply of|supplies|goods|residency|young professionals? program|programme)\b/i;
+const ACTIONABLE_SIGNAL = /\b(apply now|apply by|applications?(?: are| is)? open|application deadline|registration(?: is)? open|register now|call for (?:applications?|proposals?|papers?|abstracts?|participants?|speakers?)|submission deadline|deadline|vacanc(?:y|ies)|hiring|recruit(?:ment|ing)|request for proposals?|request for quotations?|expression of interest|invitation to bid|bid invitation|tender notice|supplier pre-?qualification|vendor pre-?qualification)\b/i;
 const EDITORIAL_SIGNAL = /\b(opinion|analysis|explainer|how to|why |what we learned|daily newsletter|weekly newsletter|market update|interview with|podcast)\b/i;
 
 export class RssFeedScraper extends BaseScraper {
@@ -36,7 +37,9 @@ export class RssFeedScraper extends BaseScraper {
       if (!title || !url) return;
       if (publishedAt) { const when = new Date(publishedAt).getTime(); if (Number.isFinite(when) && when < Date.now() - maxAgeMs) return; }
       const text = this.cleanText(`${title} ${description}`);
-      if (config.strictOpportunityFilter !== false && !OPPORTUNITY_SIGNAL.test(text)) return;
+      const signalText = config.opportunityMode === 'title-actionable' ? this.cleanText(title) : text;
+      const signal = ['actionable-only', 'title-actionable'].includes(config.opportunityMode) ? ACTIONABLE_SIGNAL : OPPORTUNITY_SIGNAL;
+      if (config.strictOpportunityFilter !== false && !signal.test(signalText)) return;
       if (EDITORIAL_SIGNAL.test(title) && !/apply|call for|grant|funding|fellowship|scholarship|tender|consult|conference|summit|symposium|supplier|supply/i.test(title)) return;
       rows.push({ title, url, description, publishedAt });
     });
