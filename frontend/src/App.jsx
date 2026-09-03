@@ -88,6 +88,7 @@ function App() {
   const [filters, setFilters] = useState({ q: '', type: '', country: '', minValue: '', deadlineDays: '', verified: true, remote: false });
   const [workspaces, setWorkspaces] = useState([]);
   const [workspace, setWorkspace] = useState(null);
+  const [readiness, setReadiness] = useState(null);
   const [activeDocId, setActiveDocId] = useState(null);
   const [applications, setApplications] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -159,21 +160,25 @@ function App() {
     catch (error) { notify(error.message); }
   }
   async function openWorkspace(id) {
-    try { const data = await api(`/api/workspaces/${id}`); setWorkspace(data); setActiveDocId(data.documents?.[0]?.id || null); }
-    catch (error) { notify(error.message); }
+    try {
+      const [data, gate] = await Promise.all([api(`/api/workspaces/${id}`), api(`/api/workspaces/${id}/readiness`)]);
+      setWorkspace(data); setReadiness(gate); setActiveDocId(data.documents?.[0]?.id || null);
+    } catch (error) { notify(error.message); }
   }
   async function startWorkspace() {
     if (!selected || !requireAuth()) return;
     setBusy('workspace-create');
     try {
       const data = selected.workspace?.id ? await api(`/api/workspaces/${selected.workspace.id}`) : await api(`/api/opportunities/${selected.id}/workspace`, { method: 'POST', body: '{}' });
-      setWorkspace(data); setActiveDocId(data.documents?.[0]?.id || null); setView('workspace'); await loadWorkspaces(); notify('Application workspace ready.');
+      const gate = await api(`/api/workspaces/${data.id}/readiness`).catch(() => null);
+      setWorkspace(data); setReadiness(gate); setActiveDocId(data.documents?.[0]?.id || null); setView('workspace'); await loadWorkspaces(); notify('Application workspace ready.');
     } catch (error) { notify(error.message); }
     finally { setBusy(''); }
   }
   async function refreshWorkspace() {
     if (!workspace) return;
-    const data = await api(`/api/workspaces/${workspace.id}`); setWorkspace(data); await loadWorkspaces();
+    const [data, gate] = await Promise.all([api(`/api/workspaces/${workspace.id}`), api(`/api/workspaces/${workspace.id}/readiness`)]);
+    setWorkspace(data); setReadiness(gate); await loadWorkspaces();
   }
   async function generatePlan() {
     if (!workspace) return;
@@ -311,7 +316,7 @@ function App() {
       <main className="page-stage">
         <AnimatePresence mode="wait">
           {view === 'discover' && <motion.div key="discover" {...pageMotion}><DiscoveryView stats={stats} opportunities={opportunities} loading={opportunityLoading} selected={selected} filters={filters} setFilters={setFilters} priorityQueue={priorityQueue} openOpportunity={openOpportunity} onClose={() => setSelected(null)} onSave={toggleSave} onAI={runOpportunityAI} onWorkspace={startWorkspace} onTrack={saveApplication} busy={busy} session={session} onAuth={() => setAuthOpen(true)} /></motion.div>}
-          {view === 'workspace' && <motion.div key="workspace" {...pageMotion}><WorkspaceView session={session} workspaces={workspaces} workspace={workspace} openWorkspace={openWorkspace} activeDocId={activeDocId} setActiveDocId={setActiveDocId} generatePlan={generatePlan} saveDocument={saveDocument} aiDraftDocument={aiDraftDocument} aiReviewDocument={aiReviewDocument} addMember={addMember} addComment={addComment} finalizeWorkspace={finalizeWorkspace} recordSubmission={recordSubmission} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
+          {view === 'workspace' && <motion.div key="workspace" {...pageMotion}><WorkspaceView session={session} workspaces={workspaces} workspace={workspace} readiness={readiness} openWorkspace={openWorkspace} activeDocId={activeDocId} setActiveDocId={setActiveDocId} generatePlan={generatePlan} saveDocument={saveDocument} aiDraftDocument={aiDraftDocument} aiReviewDocument={aiReviewDocument} addMember={addMember} addComment={addComment} finalizeWorkspace={finalizeWorkspace} recordSubmission={recordSubmission} busy={busy} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'applications' && <motion.div key="applications" {...pageMotion}><ApplicationsView session={session} applications={applications} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'documents' && <motion.div key="documents" {...pageMotion}><DocumentsView session={session} documents={documents} evidenceHealth={evidenceHealth} addDocument={addLibraryDocument} deleteDocument={deleteDocument} extractEvidence={extractEvidence} onAuth={() => setAuthOpen(true)} /></motion.div>}
           {view === 'analytics' && <motion.div key="analytics" {...pageMotion}><AnalyticsView session={session} analytics={analytics} onAuth={() => setAuthOpen(true)} /></motion.div>}
@@ -433,15 +438,20 @@ function WorkspaceView(props) {
     <div className="workspace-layout"><aside className="workspace-list"><div className="section-bar"><div><h2>Active work</h2><p>{props.workspaces.length} workspaces</p></div></div>{props.workspaces.length ? props.workspaces.map((w) => <button className={cx('workspace-list-card', props.workspace?.id === w.id && 'active')} key={w.id} onClick={() => props.openWorkspace(w.id)}><div><strong>{w.opportunity?.title || w.name}</strong><small>{w.opportunity?.organization || ''}</small></div><span>{w.progress || 0}%</span><div className="mini-progress"><i style={{ width: `${Math.max(0, Math.min(100, Number(w.progress || 0)))}%` }}/></div><small>{deadlineLabel(w.submissionDeadline || w.opportunity?.deadline)}</small></button>) : <div className="mini-empty">Start an application from Discovery.</div>}</aside>
       <WorkspaceCanvas {...props}/></div></div>;
 }
-function WorkspaceCanvas({ workspace, activeDocId, setActiveDocId, generatePlan, saveDocument, aiDraftDocument, aiReviewDocument, addMember, addComment, finalizeWorkspace, recordSubmission, busy }) {
+function WorkspaceCanvas({ workspace, readiness, activeDocId, setActiveDocId, generatePlan, saveDocument, aiDraftDocument, aiReviewDocument, addMember, addComment, finalizeWorkspace, recordSubmission, busy }) {
   if (!workspace) return <section className="workspace-canvas empty-workspace"><Layers3/><h2>Open a workspace</h2><p>Select an active application to see its preparation plan, required documents, comments and submission state.</p></section>;
   const docs = workspace.documents || []; const active = docs.find((d) => d.id === activeDocId) || docs[0]; const role = workspace.accessRole || 'owner'; const canEdit = ['owner','editor'].includes(role); const canManage = role === 'owner';
   return <section className="workspace-canvas"><div className="workspace-hero"><div><span className="eyebrow">{workspace.opportunity?.type || 'Application'}</span><h2>{workspace.opportunity?.title || workspace.name}</h2><p>{workspace.opportunity?.organization || ''} · {workspace.opportunity?.country || ''}</p></div><div className="progress-ring"><strong>{workspace.progress || 0}%</strong><small>ready</small></div></div>
     <div className="stage-rail">{['Assess & plan','Draft & review','Ready','Submitted'].map((x,i) => <div key={x} className={cx(i <= Math.max(0,['drafting','review','ready','submitted'].indexOf(workspace.status)) && 'done')}><span>{i+1}</span><small>{x}</small></div>)}</div>
-    <div className="workspace-grid"><div className="workspace-main"><section className="surface-panel ai-plan-panel"><div className="panel-title"><div><Sparkles/><span><strong>Radar AI plan</strong><small>Grounded preparation strategy</small></span></div>{canEdit && <button onClick={generatePlan}>{busy === 'workspace-plan' ? <LoaderCircle className="spin"/> : <RefreshCw/>} Refresh</button>}</div>{workspace.aiPlan ? <p className="ai-plan-copy">{workspace.aiPlan}</p> : <div className="mini-empty">Generate a plan to identify constraints, evidence gaps, specialist needs, required documents and timeline.</div>}</section>
+    <div className="workspace-grid"><div className="workspace-main"><SubmissionReadiness readiness={readiness}/><section className="surface-panel ai-plan-panel"><div className="panel-title"><div><Sparkles/><span><strong>Radar AI plan</strong><small>Grounded preparation strategy</small></span></div>{canEdit && <button onClick={generatePlan}>{busy === 'workspace-plan' ? <LoaderCircle className="spin"/> : <RefreshCw/>} Refresh</button>}</div>{workspace.aiPlan ? <p className="ai-plan-copy">{workspace.aiPlan}</p> : <div className="mini-empty">Generate a plan to identify constraints, evidence gaps, specialist needs, required documents and timeline.</div>}</section>
       <section className="surface-panel"><div className="panel-title"><div><Files/><span><strong>Required documents</strong><small>{docs.length} package items</small></span></div></div><div className="doc-tabs">{docs.map((d) => <button key={d.id} onClick={() => setActiveDocId(d.id)} className={cx(active?.id === d.id && 'active')}><span>{d.title}</span><small>{statusLabel(d.status)}</small></button>)}</div>{active && <DocumentEditor doc={active} canEdit={canEdit} onSave={saveDocument} onDraft={aiDraftDocument} onReview={aiReviewDocument} busy={busy}/>}</section>
-    </div><aside className="workspace-side"><TeamPanel workspace={workspace} canManage={canManage} addMember={addMember} addComment={addComment}/><section className="surface-panel submission-card"><Send/><h3>Submission state</h3><p>Radar validates and records your package. External submission remains explicit and user-controlled.</p><button className="button ghost" onClick={finalizeWorkspace} disabled={!canEdit}>Finalize package</button><button className="button dark" onClick={recordSubmission} disabled={!canManage || workspace.status !== 'ready'}>Record submission</button></section></aside></div>
+    </div><aside className="workspace-side"><TeamPanel workspace={workspace} canManage={canManage} addMember={addMember} addComment={addComment}/><section className="surface-panel submission-card"><Send/><h3>Submission state</h3><p>Radar validates the package before it can be marked ready. External submission remains explicit and user-controlled.</p>{readiness && <div className={cx('submission-gate-pill', readiness.canFinalize ? 'ready' : 'blocked')}><strong>{readiness.score}%</strong><span>{readiness.canFinalize ? 'gate passed' : `${readiness.blockers?.length || 0} blockers`}</span></div>}<button className="button ghost" onClick={finalizeWorkspace} disabled={!canEdit || (readiness && !readiness.canFinalize)}>Finalize package</button><button className="button dark" onClick={recordSubmission} disabled={!canManage || workspace.status !== 'ready'}>Record submission</button></section></aside></div>
   </section>;
+}
+function SubmissionReadiness({ readiness }) {
+  if (!readiness) return <section className="surface-panel readiness-panel loading"><LoaderCircle className="spin"/><div><strong>Checking submission readiness…</strong><small>Radar is validating the package.</small></div></section>;
+  const blockers = readiness.blockers || []; const warnings = readiness.warnings || [];
+  return <section className={cx('surface-panel', 'readiness-panel', readiness.canFinalize ? 'ready' : 'blocked')}><div className="readiness-head"><div><ShieldCheck/><span><small>SUBMISSION READINESS</small><strong>{readiness.canFinalize ? 'Ready to finalize' : 'Not ready yet'}</strong></span></div><div className="readiness-score"><strong>{readiness.score}%</strong><small>{readiness.status?.replaceAll('_',' ')}</small></div></div><div className="readiness-checks">{(readiness.checks || []).map((check) => <div key={check.label} className={check.passed ? 'passed' : 'failed'}>{check.passed ? <CheckCircle2/> : <AlertTriangle/>}<span>{check.label}</span></div>)}</div>{blockers.length > 0 && <div className="readiness-issues blockers"><strong>Resolve before finalizing</strong>{blockers.slice(0,5).map((item) => <p key={item.code}>{item.message}</p>)}</div>}{warnings.length > 0 && <div className="readiness-issues warnings"><strong>Review before submission</strong>{warnings.slice(0,4).map((item) => <p key={item.code}>{item.message}</p>)}</div>}</section>;
 }
 function DocumentEditor({ doc, canEdit, onSave, onDraft, onReview, busy }) {
   const [content, setContent] = useState(doc.content || ''); const [status, setStatus] = useState(doc.status || 'pending');
