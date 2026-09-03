@@ -1,0 +1,27 @@
+name: Reconcile Radar country/category expansion
+on:
+  push:
+    branches:
+      - feature/country-categories-conferences-supplies-20260903
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download exact production patch
+        run: |
+          curl -fsSL https://radar.tukutuku.org/radar-country-categories-v3.patch -o /tmp/radar.patch
+          echo "cde5bffeaefd44e3fbb7c3f87954b0b2f821d5d9ee81c31b748577b2e1de1c4e  /tmp/radar.patch" | sha256sum -c -
+      - name: Apply production delta
+        run: |
+          git apply --index /tmp/radar.patch
+          rm .github/workflows/reconcile-country-categories.yml
+          git add -A
+          git config user.name "radar-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Expand Radar country filters and opportunity categories"
+          git push origin HEAD
