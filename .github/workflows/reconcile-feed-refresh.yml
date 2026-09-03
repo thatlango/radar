@@ -1,0 +1,29 @@
+name: Reconcile Radar feed refresh
+on:
+  push:
+    branches: [feature/adaptive-feed-refresh-20260903]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/adaptive-feed-refresh-20260903
+          fetch-depth: 0
+      - name: Download exact production patch
+        run: |
+          curl -fsSL https://radar.tukutuku.org/radar-feed-refresh.patch -o /tmp/radar-feed-refresh.patch
+          echo 'c184307f974bb15c6164f6291892202630fae1944b872d955e1db604b8c200c4  /tmp/radar-feed-refresh.patch' | sha256sum -c -
+      - name: Apply production delta
+        run: |
+          git apply --check /tmp/radar-feed-refresh.patch
+          git apply /tmp/radar-feed-refresh.patch
+          rm -f .github/workflows/reconcile-feed-refresh.yml .reconcile-feed-refresh-trigger
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Implement adaptive Radar feed refresh' || exit 0
+          git push origin HEAD:feature/adaptive-feed-refresh-20260903
