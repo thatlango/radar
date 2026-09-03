@@ -1,0 +1,51 @@
+name: Radar CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DATABASE_URL: postgresql://radar:radar@127.0.0.1:5432/radar_ci
+  JWT_SECRET: radar-ci-only-not-a-production-secret
+  NODE_ENV: test
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: radar
+          POSTGRES_PASSWORD: radar
+          POSTGRES_DB: radar_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U radar -d radar_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Prepare disposable CI database
+        run: npx prisma db push --skip-generate
+      - name: Typecheck
+        run: npm run lint
+      - name: Tests
+        run: npm test -- --runInBand
+      - name: Production build
+        run: npm run build
