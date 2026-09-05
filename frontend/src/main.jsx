@@ -7,5 +7,7 @@ import './pop-ui.css';
 import './refinement-ui.css';
 import './discovery-layout.css';
 import './sitewide-hardening.css';
+import './visitor-gate.css';
+import './visitor-gate';
 
 createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);
