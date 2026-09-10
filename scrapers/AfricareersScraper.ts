@@ -56,10 +56,17 @@ export class AfricareersScraper extends BaseScraper {
           limit: Math.max(1, Math.min(100, Number(process.env.RADAR_AFRICAREERS_LIMIT || 50))),
         },
       });
-      return Array.isArray(response.data) ? response.data : [];
+      const rows: AfricareersJob[] = Array.isArray(response.data) ? response.data : [];
+      const cutoff = Date.now() - 86400000;
+      return rows.filter((row) => {
+        if (!String(row.job_title || '').trim()) return false;
+        const deadline = this.parseDate(row.application_deadline || '');
+        return !deadline || deadline.getTime() >= cutoff;
+      });
     } catch (error: any) {
       const status = Number(error?.response?.status || 0);
-      const retryAfter = Number(error?.response?.headers?.['retry-after'] || 0);
+      const headers = error?.response?.headers;
+      const retryAfter = Number(headers?.get?.('retry-after') ?? headers?.['retry-after'] ?? 0);
       if (status === 429 && attempt < 1 && retryAfter > 0 && retryAfter <= 75) {
         await this.sleep((retryAfter + 1) * 1000);
         return this.fetchPublicJobs(attempt + 1);
@@ -77,7 +84,8 @@ export class AfricareersScraper extends BaseScraper {
     const category = this.cleanText(row.job_category || row.industry || '');
     const description = this.cleanText(row.short_description || row.job_description || '');
     const requirements = this.cleanText(row.requirements || row.qualifications || '');
-    const applicationInstructions = this.cleanText(row.application_instructions || row.how_to_apply || '');
+    const rawApplicationInstructions = String(row.application_instructions || row.how_to_apply || '');
+    const applicationInstructions = this.cleanText(rawApplicationInstructions);
     const consultancy = /consultant|consultancy|advisor|advisory|technical assistance/i.test(`${title} ${employment} ${category}`);
     const location = region ? `${region}, ${country}` : country;
 
@@ -95,7 +103,7 @@ export class AfricareersScraper extends BaseScraper {
       sourceUrl: this.sourceUrl(row),
       source: 'AfriCareers Jobs',
       applicationUrl: this.validHttp(row.application_link || row.external_application_url || row.application_url),
-      applicationEmail: this.validEmail(row.application_email) || this.extractApplicationEmail(applicationInstructions),
+      applicationEmail: this.validEmail(row.application_email) || this.extractApplicationEmail(rawApplicationInstructions),
       applicationInstructions: applicationInstructions || undefined,
     };
   }
