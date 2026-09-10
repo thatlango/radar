@@ -16,6 +16,7 @@ import { EuraxessScraper } from './EuraxessScraper';
 import { IdrcScraper } from './IdrcScraper';
 import { GrandChallengesScraper } from './GrandChallengesScraper';
 import { IndicoScraper } from './IndicoScraper';
+import { AfricareersScraper } from './AfricareersScraper';
 import { RADAR_SOURCE_CATALOG } from './scanProfiles';
 
 const prisma = new PrismaClient();
@@ -110,6 +111,30 @@ export class ScraperManager {
       }
     }
 
+    // AfriCareers exposes a public, client-rendered 50-job feed backed by its public JobPost API.
+    // Keep it explicit here so Radar does not mistake the SPA shell for the actual listings.
+    const africareersName = 'AfriCareers Jobs';
+    const africareersConfig = {
+      adapter: 'africareers',
+      trust: 'curated',
+      domains: ['jobs.africareers.net'],
+      defaultType: 'job',
+      scanProfile: 'all',
+      opportunityMode: 'broad',
+      cadenceMinutes: 30,
+    };
+    const africareers = await prisma.scraperSource.findFirst({ where: { name: africareersName } });
+    if (africareers) {
+      await prisma.scraperSource.update({
+        where: { id: africareers.id },
+        data: { active: true, baseUrl: 'https://jobs.africareers.net/jobs', type: 'job', frequency: 'hot', config: africareersConfig },
+      });
+    } else {
+      await prisma.scraperSource.create({
+        data: { name: africareersName, baseUrl: 'https://jobs.africareers.net/jobs', type: 'job', frequency: 'hot', active: true, config: africareersConfig },
+      });
+    }
+
     // Long-tail discovery searches beyond the curated catalog. This is only active when a search API is configured.
     const broadName = 'Cross-source Web Discovery';
     const broadConfig = { adapter: 'search', scanProfile: 'all', domains: [], trust: 'secondary', coverage: 'long-tail-web' };
@@ -186,6 +211,7 @@ export class ScraperManager {
     if (adapter === 'euraxess') return EuraxessScraper;
     if (adapter === 'idrc') return IdrcScraper;
     if (adapter === 'grandchallenges') return GrandChallengesScraper;
+    if (adapter === 'africareers') return AfricareersScraper;
     if (adapter === 'linkedin') return LinkedInScraper;
     if (adapter === 'afdb') return AfDBScraper;
     const normalized = String(source?.name || '').toLowerCase().replace(/\s+/g, '');
