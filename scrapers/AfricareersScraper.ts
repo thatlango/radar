@@ -20,6 +20,7 @@ type AfricareersJob = {
   requirements?: string;
   qualifications?: string;
   application_deadline?: string;
+  application_link?: string;
   external_application_url?: string;
   application_url?: string;
   application_email?: string;
@@ -50,7 +51,7 @@ export class AfricareersScraper extends BaseScraper {
           'X-App-Id': AFRICAREERS_APP_ID,
         },
         params: {
-          q: JSON.stringify({ approval_status: 'approved', status: 'active' }),
+          q: JSON.stringify({ admin_approval_status: 'approved', status: 'active' }),
           sort: '-approved_at',
           limit: Math.max(1, Math.min(100, Number(process.env.RADAR_AFRICAREERS_LIMIT || 50))),
         },
@@ -76,6 +77,7 @@ export class AfricareersScraper extends BaseScraper {
     const category = this.cleanText(row.job_category || row.industry || '');
     const description = this.cleanText(row.short_description || row.job_description || '');
     const requirements = this.cleanText(row.requirements || row.qualifications || '');
+    const applicationInstructions = this.cleanText(row.application_instructions || row.how_to_apply || '');
     const consultancy = /consultant|consultancy|advisor|advisory|technical assistance/i.test(`${title} ${employment} ${category}`);
     const location = region ? `${region}, ${country}` : country;
 
@@ -92,9 +94,9 @@ export class AfricareersScraper extends BaseScraper {
       deadline: this.parseDate(row.application_deadline || ''),
       sourceUrl: this.sourceUrl(row),
       source: 'AfriCareers Jobs',
-      applicationUrl: this.validHttp(row.external_application_url || row.application_url),
-      applicationEmail: this.validEmail(row.application_email),
-      applicationInstructions: this.cleanText(row.application_instructions || row.how_to_apply || '') || undefined,
+      applicationUrl: this.validHttp(row.application_link || row.external_application_url || row.application_url),
+      applicationEmail: this.validEmail(row.application_email) || this.extractApplicationEmail(applicationInstructions),
+      applicationInstructions: applicationInstructions || undefined,
     };
   }
 
@@ -126,5 +128,10 @@ export class AfricareersScraper extends BaseScraper {
   private validEmail(value?: string): string | undefined {
     const email = String(value || '').trim();
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
+  }
+
+  private extractApplicationEmail(value: string): string | undefined {
+    const match = String(value || '').match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
+    return match?.[0];
   }
 }
