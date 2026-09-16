@@ -1,0 +1,35 @@
+/*
+ * Radar legacy CSS -> TDS 2.0 discovery compatibility.
+ * Loaded last while legacy screens are progressively rebuilt from shared primitives.
+ */
+[data-product="radar"]{
+  --navy:var(--brand-navy);--gold:var(--primary);--black:var(--foreground);--white:var(--surface);--mist:var(--border);
+  --pumpkin:var(--warning);--charcoal:var(--brand-charcoal);--chartreuse:var(--success);--teal:var(--brand-forest);
+  --ink:var(--foreground);--muted:var(--foreground-secondary);--line:var(--border);
+  --soft-gold:var(--primary-soft);--soft-pumpkin:var(--warning-soft);--soft-mint:var(--success-soft);--soft-teal:var(--info-soft);
+  --soft-lavender:var(--cat-4-soft);--soft-sky:var(--info-soft);--soft-rose:var(--danger-soft);--soft-sand:var(--brand-sand);
+  --shadow:var(--shadow-e2);--shadow-sm:var(--shadow-e1);
+}
+html,body,#root{font-family:var(--font-sans)!important;color:var(--foreground)!important;background:var(--background)!important}
+.radar-app{background:var(--background)!important}
+.sidebar,.locked-state,.workspace-hero,.pricing-hero{background:var(--brand-navy)!important}
+.sidebar-card,.ai-plan-panel,.submission-card,.briefing-card{background:var(--surface-muted)!important}
+.topbar{background:var(--surface)!important;backdrop-filter:none!important;border-color:var(--border)!important}
+.avatar,.mini-avatar{background:var(--primary-soft)!important;color:var(--primary)!important}
+.stat-card.gold,.stat-card.teal,.stat-card.pumpkin,.stat-card.chartreuse,.stat-card.navy,
+.opportunity-card.tone-peach,.opportunity-card.tone-mint,.opportunity-card.tone-lavender,.opportunity-card.tone-sky,.opportunity-card.tone-rose,.opportunity-card.tone-sand,
+.library-card.tone-peach,.library-card.tone-mint,.library-card.tone-lavender,.library-card.tone-sky,.library-card.tone-rose,.library-card.tone-sand,
+.analytics-card.tone-peach,.analytics-card.tone-mint,.analytics-card.tone-lavender,.analytics-card.tone-sky,.analytics-card.tone-rose,.analytics-card.tone-sand{
+  background:var(--surface)!important;border-color:var(--border)!important;
+}
+.opportunity-card::before,.pricing-hero::after{display:none!important}
+.skeleton-card i{background:var(--surface-muted)!important;animation:none!important}
+.ai-result{background:var(--brand-navy)!important}
+.bar-chart i{background:var(--primary)!important}
+.modal-layer{backdrop-filter:none!important}
+.plan-card.featured{background:var(--primary-soft)!important;border-color:var(--primary)!important}
+.button,.new-search-btn,.compact-btn,.icon-btn,.account-pill,.filter-rail input:not([type=checkbox]),.filter-rail select{
+  border-radius:var(--radius-md)!important;
+}
+.button,.new-search-btn{min-height:44px}
+@media(pointer:coarse){.button,.new-search-btn,.icon-btn,.account-pill{min-height:48px}}
