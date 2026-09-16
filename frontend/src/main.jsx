@@ -8,6 +8,10 @@ import './refinement-ui.css';
 import './discovery-layout.css';
 import './sitewide-hardening.css';
 import './visitor-gate.css';
+import './tds-2.0.css';
+import './tds-radar-migration.css';
 import './visitor-gate';
+
+document.documentElement.dataset.product = 'radar';
 
 createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);
