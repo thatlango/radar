@@ -1,0 +1,14 @@
+{
+  "designSystem": "TDS 2.0",
+  "sourceRepository": "thatlango/tuku-shared-language",
+  "sourceCommit": "33a67d4a2d47520e12ffe41712e1712bcdc89fba",
+  "productId": "radar",
+  "state": "migrating",
+  "archetype": "discovery",
+  "legacyCleanup": [
+    "gradients",
+    "decorative glow",
+    "non-TDS typography",
+    "oversized radii"
+  ]
+}
