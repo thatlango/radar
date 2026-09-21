@@ -1,8 +1,49 @@
-import OpenAI from 'openai';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const CORE_AI_URL = (process.env.TUKU_CORE_INTERNAL_URL || process.env.TUKU_CORE_URL || 'https://core.tukutuku.org').replace(/\/$/, '');
+const CORE_AI_KEY = process.env.TUKU_AI_INTEGRATION_KEY || '';
+
+type CoreCapability = 'analyze' | 'classify' | 'extract' | 'summarize' | 'recommend' | 'draft' | 'explain';
+
+async function coreAiText(
+  capability: CoreCapability,
+  instruction: string,
+  context: Record<string, unknown>,
+  maxOutputTokens: number,
+  temperature: number,
+  subjectRef?: string,
+) {
+  if (!CORE_AI_KEY) throw new Error('Radar Tuku AI integration is not configured');
+  const response = await fetch(CORE_AI_URL + '/api/v1/integrations/ai/assist', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-tuku-product-code': 'radar',
+      'x-tuku-integration-key': CORE_AI_KEY,
+    },
+    body: JSON.stringify({
+      capability,
+      instruction,
+      context,
+      maxOutputTokens,
+      temperature,
+      ...(subjectRef ? { subjectRef } : {}),
+    }),
+    signal: AbortSignal.timeout(Math.max(30000, Math.min(120000, Number(process.env.TUKU_AI_TIMEOUT_MS || 90000)))),
+  });
+  const payload: any = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || payload?.message || 'Tuku AI returned HTTP ' + response.status);
+  }
+  const result = payload?.data ?? payload;
+  if (typeof result?.text !== 'string' || !result.text.trim()) {
+    throw new Error('Tuku AI returned an empty response');
+  }
+  return result.text.trim();
+}
+
 
 export class ProAIFeatures {
   /**
@@ -46,23 +87,9 @@ CRITICAL RULES:
 Return the rewritten resume in clean, professional format.`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert resume writer helping African talent compete globally.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 2000
-      });
+      const aiText = await coreAiText('draft', prompt, { surface: 'radar-resume-rewrite', userId }, 2000, 0.7, 'user:' + userId);
 
-      return completion.choices[0].message.content || 'Unable to generate rewrite';
+      return aiText || 'Unable to generate rewrite';
 
     } catch (error) {
       console.error('Resume rewrite error:', error);
@@ -131,23 +158,9 @@ Tone: Professional, confident, authentic, enthusiastic
 Format: Standard business letter structure`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert career coach writing compelling cover letters.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1000
-      });
+      const aiText = await coreAiText('draft', prompt, { surface: 'radar-cover-letter', userId, opportunityId }, 1000, 0.7, 'opportunity:' + opportunityId);
 
-      const coverLetter = completion.choices[0].message.content || '';
+      const coverLetter = aiText || '';
 
       // Store the generated cover letter
       await prisma.application.upsert({
@@ -240,23 +253,9 @@ Return as JSON array:
 ]`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert interview coach. Provide practical, actionable interview preparation in valid JSON format.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 3000
-      });
+      const aiText = await coreAiText('recommend', prompt, { surface: 'radar-interview-prep', userId, opportunityId }, 3000, 0.7, 'opportunity:' + opportunityId);
 
-      const content = completion.choices[0].message.content || '[]';
+      const content = aiText || '[]';
       const questions = JSON.parse(content);
 
       return { questions };
@@ -320,23 +319,9 @@ Return as JSON:
 }`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert salary negotiation coach with deep knowledge of African and global markets.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 1500
-      });
+      const aiText = await coreAiText('recommend', prompt, { surface: 'radar-salary-negotiation', userId, opportunityId, offeredSalary }, 1500, 0.7, 'opportunity:' + opportunityId);
 
-      const result = JSON.parse(completion.choices[0].message.content || '{}');
+      const result = JSON.parse(aiText || '{}');
 
       return {
         analysis: result.analysis || '',
@@ -375,23 +360,9 @@ Extract and return as JSON:
 }`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a resume parser. Extract structured data in valid JSON format.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 1000
-      });
+      const aiText = await coreAiText('extract', prompt, { surface: 'radar-resume-parser' }, 1000, 0.3, 'resume-parse');
 
-      const result = JSON.parse(completion.choices[0].message.content || '{}');
+      const result = JSON.parse(aiText || '{}');
 
       return {
         skills: result.skills || [],
@@ -434,23 +405,9 @@ Focus on: role responsibilities, ideal candidate, and key benefits.
 Make it scannable and action-oriented.`;
 
     try {
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a concise summarizer. Create clear, actionable summaries.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.5,
-        max_tokens: 200
-      });
+      const aiText = await coreAiText('summarize', prompt, { surface: 'radar-opportunity-summary', opportunityId }, 200, 0.5, 'opportunity:' + opportunityId);
 
-      const summary = completion.choices[0].message.content || '';
+      const summary = aiText || '';
 
       // Store AI summary
       await prisma.opportunity.update({
